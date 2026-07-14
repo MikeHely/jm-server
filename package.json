@@ -1,1 +1,19 @@
-{"name": "jm-server", "dependencies": {"express": "^4.18.2", "cors": "^2.8.5", "@supabase/supabase-js": "^2.38.0", "bcrypt": "^5.1.1"}}
+{
+  "name": "jm-server",
+  "version": "1.0.0",
+  "description": "Backend JM Store",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "bcrypt": "^5.1.1",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "@supabase/supabase-js": "^2.38.0"
+  },
+  "engines": {
+    "node": ">=18.x"
+  }
+}
