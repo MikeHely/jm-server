@@ -14,8 +14,22 @@ const NUMERO_WHATSAPP_JM = "244949321312"; // TROCA PELO SEU NUMERO
 
 // 2. ROTAS PÚBLICAS
 app.get('/api/produtos', async (req, res) => {
-  let { data } = await supabase.from('produtos').select('*').order('id');
-  res.json(data);
+  try {
+    console.log("Tentando buscar produtos..."); // log pra ver se a rota é chamada
+    console.log("URL:", process.env.SUPABASE_URL); // log pra ver se a env veio
+    
+    const { data, error } = await supabase.from('produtos').select('*');
+    
+    if (error) {
+      console.error("ERRO SUPABASE:", error); // isso vai pro log do Render
+      return res.status(500).json({ error: error.message });
+    }
+    
+    res.json(data);
+  } catch (err) {
+    console.error("ERRO GERAL:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/cadastro', async (req, res) => {
