@@ -7,8 +7,10 @@ app.use(cors());
 app.use(express.json());
 
 // 1. CONFIGURAÇÕES - TROCA AQUI
-const supabase = createClient('https://SEU-PROJETO.supabase.co', 'SUA-CHAVE-ANON');
-const NUMERO_WHATSAPP_JM = "244923000000"; // TROCA PELO SEU NUMERO
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY;
+const supabase = createClient(supabaseUrl, supabaseKey);
+const NUMERO_WHATSAPP_JM = "244949321312"; // TROCA PELO SEU NUMERO
 
 // 2. ROTAS PÚBLICAS
 app.get('/api/produtos', async (req, res) => {
