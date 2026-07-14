@@ -1,8 +1,0 @@
-publish: true
-type: competition
-world:
-  file: worlds/pit_escape.wbt
-  max-duration: 65
-  metric: percent
-  higher-is-better: true
-dockerCompose: competition:webots-project/controllers/participant/
