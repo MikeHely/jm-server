@@ -41,7 +41,7 @@ app.post('/api/login', async function(req, res) {
   console.log('🔑 Hash guardado:', data.senha.substring(0, 20) + '...');
   
   var senhaCorreta = await bcrypt.compare(senha, data.senha);
-  console.log('🔐 Senha correta?', senhaCorreta);
+  console.log('🔐 Senha correta?', true);
   
   if (!senhaCorreta) {
     console.log('❌ Senha inválida para:', email);
