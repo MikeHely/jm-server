@@ -14,6 +14,42 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+
+app.post('/api/login', async function(req, res) {
+  var email = req.body.email;
+  var senha = req.body.senha;
+  
+  console.log('🔐 Tentativa de login:', email);
+  
+  const { data, error } = await supabase
+    .from('usuarios')
+    .select('*')
+    .eq('email', email)
+    .single();
+  
+  if (error) {
+    console.log('❌ Erro no Supabase:', error);
+    return res.status(401).json({ error: "Email ou senha inválidos" });
+  }
+  
+  if (!data) {
+    console.log('❌ Usuário não encontrado:', email);
+    return res.status(401).json({ error: "Email ou senha inválidos" });
+  }
+  
+  console.log('✅ Usuário encontrado:', data.email, 'is_admin:', data.is_admin);
+  console.log('🔑 Hash guardado:', data.senha.substring(0, 20) + '...');
+  
+  var senhaCorreta = await bcrypt.compare(senha, data.senha);
+  console.log('🔐 Senha correta?', senhaCorreta);
+  
+  if (!senhaCorreta) {
+    console.log('❌ Senha inválida para:', email);
+    return res.status(401).json({ error: "Email ou senha inválidos" });
+  }
+  // ... resto
+});
+
 // ===== CONFIGURAÇÕES =====
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
