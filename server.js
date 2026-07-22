@@ -77,9 +77,9 @@ function verificarAdmin(req, res, next) {
 // ===== CONFIGURAÇÃO UPLOAD =====
 const storage = multer.memoryStorage();
 const upload = multer({
-  storage,
+  storage: storage,
   limits: { fileSize: 5 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
+  fileFilter: function(req, file, cb) {
     const tipos = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
     if (tipos.includes(file.mimetype)) {
       cb(null, true);
@@ -97,10 +97,10 @@ async function enviarEmailNotificacao(novosRegistros) {
   }
 
   try {
-    const abandonosLista = novosRegistros.filter(r => r.status === 'abandonado');
-    const finalizadosLista = novosRegistros.filter(r => r.status === 'finalizado');
+    const abandonosLista = novosRegistros.filter(function(r) { return r.status === 'abandonado'; });
+    const finalizadosLista = novosRegistros.filter(function(r) { return r.status === 'finalizado'; });
     
-    const html = `
+    let html = `
       <!DOCTYPE html>
       <html>
       <head>
@@ -141,71 +141,97 @@ async function enviarEmailNotificacao(novosRegistros) {
           <ul>
             <li>🛒 Abandonos: ${abandonosLista.length}</li>
             <li>✅ Finalizados: ${finalizadosLista.length}</li>
-            <li>💰 Total em vendas potenciais: ${finalizadosLista.reduce((s, r) => s + (r.total || 0), 0).toLocaleString('pt-PT')} KZ</li>
+            <li>💰 Total em vendas potenciais: ${finalizadosLista.reduce(function(s, r) { return s + (r.total || 0); }, 0).toLocaleString('pt-PT')} KZ</li>
           </ul>
-          
-          ${abandonosLista.length > 0 ? `
-            <h3 style="color:#92400E; margin-top:20px;">🛒 ABANDONOS (${abandonosLista.length})</h3>
-            ${abandonosLista.map(a => `
-              <div class="card card-abandono">
-                <div style="display:flex; justify-content:space-between;">
-                  <div>
-                    <strong>${a.usuario?.nome || 'Visitante'}</strong>
-                    <span style="display:block; font-size:13px; color:#666;">
-                      📧 ${a.usuario?.email || 'Não informado'} | 📱 ${a.usuario?.telefone || 'Não informado'}
-                    </span>
-                  </div>
-                  <div>
-                    <span class="status status-abandono">🛒 Abandonado</span>
-                    <span style="display:block; font-weight:bold; color:#92400E;">💰 ${a.total?.toLocaleString('pt-PT') || '0'} KZ</span>
-                  </div>
-                </div>
-                <details>
-                  <summary style="cursor:pointer; font-size:13px; color:#1E3A8A;">Ver itens</summary>
-                  ${a.itens?.map(item => `
-                    <div style="display:flex; gap:10px; padding:5px 0; font-size:13px; border-bottom:1px solid #f0f0f0;">
-                      <span>${item.nome}</span>
-                      <span>x${item.quantidade}</span>
-                      <span style="margin-left:auto;">${(item.preco * item.quantidade).toLocaleString('pt-PT')} KZ</span>
-                    </div>
-                  `).join('') || '<p style="color:#999;">Sem itens</p>'}
-                </details>
+    `;
+    
+    if (abandonosLista.length > 0) {
+      html += `<h3 style="color:#92400E; margin-top:20px;">🛒 ABANDONOS (${abandonosLista.length})</h3>`;
+      for (var a = 0; a < abandonosLista.length; a++) {
+        var ab = abandonosLista[a];
+        html += `
+          <div class="card card-abandono">
+            <div style="display:flex; justify-content:space-between;">
+              <div>
+                <strong>${ab.usuario && ab.usuario.nome ? ab.usuario.nome : 'Visitante'}</strong>
+                <span style="display:block; font-size:13px; color:#666;">
+                  📧 ${ab.usuario && ab.usuario.email ? ab.usuario.email : 'Não informado'} | 📱 ${ab.usuario && ab.usuario.telefone ? ab.usuario.telefone : 'Não informado'}
+                </span>
               </div>
-            `).join('')}
-          ` : ''}
-          
-          ${finalizadosLista.length > 0 ? `
-            <h3 style="color:#065F46; margin-top:20px;">✅ FINALIZADOS (${finalizadosLista.length})</h3>
-            ${finalizadosLista.map(a => `
-              <div class="card card-finalizado">
-                <div style="display:flex; justify-content:space-between;">
-                  <div>
-                    <strong>${a.usuario?.nome || 'Visitante'}</strong>
-                    <span style="display:block; font-size:13px; color:#666;">
-                      📧 ${a.usuario?.email || 'Não informado'} | 📱 ${a.usuario?.telefone || 'Não informado'}
-                    </span>
-                    <span style="font-size:12px; color:#999;">🕐 ${new Date(a.timestamp).toLocaleString('pt-PT')}</span>
-                  </div>
-                  <div>
-                    <span class="status status-finalizado">✅ Finalizado</span>
-                    <span style="display:block; font-weight:bold; color:#16A34A;">💰 ${a.total?.toLocaleString('pt-PT') || '0'} KZ</span>
-                    ${a.pedido_id ? `<span style="display:block; font-size:12px; color:#3B82F6;">📋 Pedido #${a.pedido_id}</span>` : ''}
-                  </div>
-                </div>
-                <details>
-                  <summary style="cursor:pointer; font-size:13px; color:#1E3A8A;">Ver itens</summary>
-                  ${a.itens?.map(item => `
-                    <div style="display:flex; gap:10px; padding:5px 0; font-size:13px; border-bottom:1px solid #f0f0f0;">
-                      <span>${item.nome}</span>
-                      <span>x${item.quantidade}</span>
-                      <span style="margin-left:auto;">${(item.preco * item.quantidade).toLocaleString('pt-PT')} KZ</span>
-                    </div>
-                  `).join('') || '<p style="color:#999;">Sem itens</p>'}
-                </details>
+              <div>
+                <span class="status status-abandono">🛒 Abandonado</span>
+                <span style="display:block; font-weight:bold; color:#92400E;">💰 ${(ab.total || 0).toLocaleString('pt-PT')} KZ</span>
               </div>
-            `).join('')}
-          ` : ''}
-          
+            </div>
+            <details>
+              <summary style="cursor:pointer; font-size:13px; color:#1E3A8A;">Ver itens</summary>
+        `;
+        if (ab.itens && ab.itens.length > 0) {
+          for (var i = 0; i < ab.itens.length; i++) {
+            var item = ab.itens[i];
+            html += `
+              <div style="display:flex; gap:10px; padding:5px 0; font-size:13px; border-bottom:1px solid #f0f0f0;">
+                <span>${item.nome}</span>
+                <span>x${item.quantidade}</span>
+                <span style="margin-left:auto;">${(item.preco * item.quantidade).toLocaleString('pt-PT')} KZ</span>
+              </div>
+            `;
+          }
+        } else {
+          html += '<p style="color:#999;">Sem itens</p>';
+        }
+        html += `
+            </details>
+          </div>
+        `;
+      }
+    }
+    
+    if (finalizadosLista.length > 0) {
+      html += `<h3 style="color:#065F46; margin-top:20px;">✅ FINALIZADOS (${finalizadosLista.length})</h3>`;
+      for (var f = 0; f < finalizadosLista.length; f++) {
+        var fin = finalizadosLista[f];
+        html += `
+          <div class="card card-finalizado">
+            <div style="display:flex; justify-content:space-between;">
+              <div>
+                <strong>${fin.usuario && fin.usuario.nome ? fin.usuario.nome : 'Visitante'}</strong>
+                <span style="display:block; font-size:13px; color:#666;">
+                  📧 ${fin.usuario && fin.usuario.email ? fin.usuario.email : 'Não informado'} | 📱 ${fin.usuario && fin.usuario.telefone ? fin.usuario.telefone : 'Não informado'}
+                </span>
+                <span style="font-size:12px; color:#999;">🕐 ${new Date(fin.timestamp).toLocaleString('pt-PT')}</span>
+              </div>
+              <div>
+                <span class="status status-finalizado">✅ Finalizado</span>
+                <span style="display:block; font-weight:bold; color:#16A34A;">💰 ${(fin.total || 0).toLocaleString('pt-PT')} KZ</span>
+                ${fin.pedido_id ? `<span style="display:block; font-size:12px; color:#3B82F6;">📋 Pedido #${fin.pedido_id}</span>` : ''}
+              </div>
+            </div>
+            <details>
+              <summary style="cursor:pointer; font-size:13px; color:#1E3A8A;">Ver itens</summary>
+        `;
+        if (fin.itens && fin.itens.length > 0) {
+          for (var j = 0; j < fin.itens.length; j++) {
+            var item2 = fin.itens[j];
+            html += `
+              <div style="display:flex; gap:10px; padding:5px 0; font-size:13px; border-bottom:1px solid #f0f0f0;">
+                <span>${item2.nome}</span>
+                <span>x${item2.quantidade}</span>
+                <span style="margin-left:auto;">${(item2.preco * item2.quantidade).toLocaleString('pt-PT')} KZ</span>
+              </div>
+            `;
+          }
+        } else {
+          html += '<p style="color:#999;">Sem itens</p>';
+        }
+        html += `
+            </details>
+          </div>
+        `;
+      }
+    }
+    
+    html += `
           <div style="text-align:center; margin-top:20px;">
             <a href="${process.env.ADMIN_URL || 'https://jm-store.vercel.app/admin.html'}" class="botao-admin">
               📊 Ver no Painel Admin
@@ -224,11 +250,11 @@ async function enviarEmailNotificacao(novosRegistros) {
     await transporter.sendMail({
       from: process.env.EMAIL_USER,
       to: process.env.EMAIL_NOTIFICACAO,
-      subject: `📊 JM Store - ${novosRegistros.length} novos registros!`,
-      html
+      subject: '📊 JM Store - ' + novosRegistros.length + ' novos registros!',
+      html: html
     });
     
-    console.log(`📧 Email enviado com ${novosRegistros.length} registros`);
+    console.log('📧 Email enviado com ' + novosRegistros.length + ' registros');
     return true;
   } catch (error) {
     console.error('❌ Erro ao enviar email:', error);
@@ -239,39 +265,50 @@ async function enviarEmailNotificacao(novosRegistros) {
 // ===== ROTAS PÚBLICAS =====
 
 // Produtos públicos (apenas visíveis)
-app.get('/api/produtos', async (req, res) => {
+app.get('/api/produtos', async function(req, res) {
   const { data, error } = await supabase
     .from('produtos')
     .select('*')
     .eq('visivel', true)
     .order('id');
-  if (error) return res.status(500).json({ error });
+  if (error) return res.status(500).json({ error: error });
   res.json(data);
 });
 
 // Categorias
-app.get('/api/categorias', async (req, res) => {
+app.get('/api/categorias', async function(req, res) {
   const { data, error } = await supabase
     .from('produtos')
     .select('categoria')
     .eq('visivel', true)
     .order('categoria');
-  if (error) return res.status(500).json({ error });
-  const categorias = [...new Set(data.map(p => p.categoria))];
+  if (error) return res.status(500).json({ error: error });
+  var categorias = [];
+  var seen = {};
+  for (var i = 0; i < data.length; i++) {
+    var cat = data[i].categoria;
+    if (!seen[cat]) {
+      seen[cat] = true;
+      categorias.push(cat);
+    }
+  }
   res.json(categorias);
 });
 
 // ===== USUÁRIOS =====
 
 // Registro completo
-app.post('/api/register', async (req, res) => {
-  const { email, password, nome, telefone, regiao } = req.body;
+app.post('/api/register', async function(req, res) {
+  var email = req.body.email;
+  var password = req.body.password;
+  var nome = req.body.nome;
+  var telefone = req.body.telefone;
+  var regiao = req.body.regiao;
   
   if (!email || !password || !nome || !telefone) {
     return res.status(400).json({ error: "Todos os campos são obrigatórios" });
   }
   
-  // Verifica se email já existe
   const { data: existing } = await supabase
     .from('usuarios')
     .select('id')
@@ -282,16 +319,16 @@ app.post('/api/register', async (req, res) => {
     return res.status(400).json({ error: "Email já cadastrado" });
   }
   
-  const hash = await bcrypt.hash(password, 10);
+  var hash = await bcrypt.hash(password, 10);
   
   const { data, error } = await supabase
     .from('usuarios')
     .insert([{ 
-      email, 
+      email: email, 
       senha: hash, 
-      nome, 
-      telefone, 
-      regiao,
+      nome: nome, 
+      telefone: telefone, 
+      regiao: regiao,
       is_admin: false,
       data_cadastro: new Date().toISOString()
     }])
@@ -304,13 +341,14 @@ app.post('/api/register', async (req, res) => {
   
   res.json({ 
     msg: "Usuário criado com sucesso!",
-    user: { id: data[0].id, email, nome }
+    user: { id: data[0].id, email: email, nome: nome }
   });
 });
 
 // Login
-app.post('/api/login', async (req, res) => {
-  const { email, senha } = req.body;
+app.post('/api/login', async function(req, res) {
+  var email = req.body.email;
+  var senha = req.body.senha;
   
   const { data } = await supabase
     .from('usuarios')
@@ -322,12 +360,12 @@ app.post('/api/login', async (req, res) => {
     return res.status(401).json({ error: "Email ou senha inválidos" });
   }
   
-  const senhaCorreta = await bcrypt.compare(senha, data.senha);
+  var senhaCorreta = await bcrypt.compare(senha, data.senha);
   if (!senhaCorreta) {
     return res.status(401).json({ error: "Email ou senha inválidos" });
   }
 
-  const usuario = { 
+  var usuario = { 
     id: data.id, 
     email: data.email, 
     nome: data.nome,
@@ -336,60 +374,63 @@ app.post('/api/login', async (req, res) => {
     is_admin: !!data.is_admin 
   };
   
-  const token = jwt.sign(usuario, JWT_SECRET, { expiresIn: '7d' });
+  var token = jwt.sign(usuario, JWT_SECRET, { expiresIn: '7d' });
 
-  res.json({ msg: "Logado", user: usuario, token });
+  res.json({ msg: "Logado", user: usuario, token: token });
 });
 
 // Buscar perfil
-app.get('/api/usuario/perfil', verificarToken, async (req, res) => {
+app.get('/api/usuario/perfil', verificarToken, async function(req, res) {
   const { data, error } = await supabase
     .from('usuarios')
     .select('id, email, nome, telefone, regiao, is_admin, data_cadastro')
     .eq('id', req.usuario.id)
     .single();
   
-  if (error) return res.status(500).json({ error });
+  if (error) return res.status(500).json({ error: error });
   res.json(data);
 });
 
 // Atualizar perfil
-app.put('/api/usuario/perfil', verificarToken, async (req, res) => {
-  const { nome, telefone, regiao } = req.body;
+app.put('/api/usuario/perfil', verificarToken, async function(req, res) {
+  var nome = req.body.nome;
+  var telefone = req.body.telefone;
+  var regiao = req.body.regiao;
   
   const { data, error } = await supabase
     .from('usuarios')
-    .update({ nome, telefone, regiao })
+    .update({ nome: nome, telefone: telefone, regiao: regiao })
     .eq('id', req.usuario.id)
     .select();
   
-  if (error) return res.status(500).json({ error });
+  if (error) return res.status(500).json({ error: error });
   res.json(data[0]);
 });
 
 // ===== CARRINHO =====
 
 // Salvar carrinho
-app.post('/api/carrinho', verificarToken, async (req, res) => {
-  const { itens } = req.body;
-  const usuario_id = req.usuario.id;
+app.post('/api/carrinho', verificarToken, async function(req, res) {
+  var itens = req.body.itens;
+  var usuario_id = req.usuario.id;
   
   if (!itens || !Array.isArray(itens)) {
     return res.status(400).json({ error: "Itens inválidos" });
   }
   
-  // Remove carrinho antigo
   await supabase
     .from('carrinho')
     .delete()
     .eq('usuario_id', usuario_id);
   
-  // Insere novos itens
-  const itensParaSalvar = itens.map(item => ({
-    usuario_id,
-    produto_id: item.id,
-    quantidade: item.quantidade
-  }));
+  var itensParaSalvar = [];
+  for (var i = 0; i < itens.length; i++) {
+    itensParaSalvar.push({
+      usuario_id: usuario_id,
+      produto_id: itens[i].id,
+      quantidade: itens[i].quantidade
+    });
+  }
   
   const { error } = await supabase
     .from('carrinho')
@@ -404,15 +445,12 @@ app.post('/api/carrinho', verificarToken, async (req, res) => {
 });
 
 // Buscar carrinho
-app.get('/api/carrinho', verificarToken, async (req, res) => {
-  const usuario_id = req.usuario.id;
+app.get('/api/carrinho', verificarToken, async function(req, res) {
+  var usuario_id = req.usuario.id;
   
   const { data, error } = await supabase
     .from('carrinho')
-    .select(`
-      quantidade,
-      produtos (*)
-    `)
+    .select('quantidade, produtos(*)')
     .eq('usuario_id', usuario_id);
   
   if (error) {
@@ -420,27 +458,22 @@ app.get('/api/carrinho', verificarToken, async (req, res) => {
     return res.status(500).json({ error: "Erro ao buscar carrinho" });
   }
   
-  const itens = data.map(item => ({
-    ...item.produtos,
-    quantidade: item.quantidade
-  }));
+  var itens = [];
+  for (var i = 0; i < data.length; i++) {
+    var item = data[i].produtos;
+    item.quantidade = data[i].quantidade;
+    itens.push(item);
+  }
   
   res.json(itens);
 });
 
 // ===== PEDIDOS =====
 
-app.get('/api/pedidos', verificarToken, async (req, res) => {
+app.get('/api/pedidos', verificarToken, async function(req, res) {
   const { data, error } = await supabase
     .from('pedidos')
-    .select(`
-      *,
-      itens_pedido (
-        quantidade,
-        preco_unitario,
-        produtos (*)
-      )
-    `)
+    .select('*, itens_pedido (quantidade, preco_unitario, produtos (*))')
     .eq('usuario_id', req.usuario.id)
     .order('data_pedido', { ascending: false });
   
@@ -454,24 +487,35 @@ app.get('/api/pedidos', verificarToken, async (req, res) => {
 
 // ===== RASTREIO DE ABANDONO =====
 
-// Registrar início do checkout
-app.post('/api/checkout/registrar', async (req, res) => {
-  const { sessionId, usuario, itens } = req.body;
+app.post('/api/checkout/registrar', async function(req, res) {
+  var sessionId = req.body.sessionId;
+  var usuario = req.body.usuario;
+  var itens = req.body.itens;
   
   if (!sessionId) {
     return res.status(400).json({ error: "sessionId é obrigatório" });
   }
   
-  const total = (itens || []).reduce((s, i) => s + (i.preco || 0) * (i.quantidade || 1), 0);
+  var total = 0;
+  if (itens) {
+    for (var i = 0; i < itens.length; i++) {
+      total = total + (itens[i].preco || 0) * (itens[i].quantidade || 1);
+    }
+  }
   
-  // Verifica se já existe
-  const existente = abandonos.find(a => a.sessionId === sessionId);
+  var existente = null;
+  for (var j = 0; j < abandonos.length; j++) {
+    if (abandonos[j].sessionId === sessionId) {
+      existente = abandonos[j];
+      break;
+    }
+  }
   
-  const registro = {
-    sessionId,
+  var registro = {
+    sessionId: sessionId,
     usuario: usuario || { nome: 'Visitante', email: 'Não informado', telefone: 'Não informado' },
     itens: itens || [],
-    total,
+    total: total,
     step: 'checkout_aberto',
     timestamp: new Date().toISOString(),
     status: 'abandonado',
@@ -480,29 +524,46 @@ app.post('/api/checkout/registrar', async (req, res) => {
   };
   
   if (existente) {
-    Object.assign(existente, registro);
+    existente.usuario = registro.usuario;
+    existente.itens = registro.itens;
+    existente.total = registro.total;
+    existente.step = registro.step;
+    existente.timestamp = registro.timestamp;
+    existente.status = registro.status;
   } else {
     abandonos.push(registro);
-    contadorRegistros++;
+    contadorRegistros = contadorRegistros + 1;
   }
   
   res.json({ msg: "Checkout registrado" });
 });
 
-// Atualizar step do checkout
-app.post('/api/checkout/step', async (req, res) => {
-  const { sessionId, step, dados } = req.body;
+app.post('/api/checkout/step', async function(req, res) {
+  var sessionId = req.body.sessionId;
+  var step = req.body.step;
+  var dados = req.body.dados;
   
-  const registro = abandonos.find(a => a.sessionId === sessionId);
+  var registro = null;
+  for (var i = 0; i < abandonos.length; i++) {
+    if (abandonos[i].sessionId === sessionId) {
+      registro = abandonos[i];
+      break;
+    }
+  }
+  
   if (registro) {
     registro.step = step;
     if (dados) {
-      registro.usuario = { ...registro.usuario, ...dados };
+      if (!registro.usuario) registro.usuario = {};
+      if (dados.nome) registro.usuario.nome = dados.nome;
+      if (dados.email) registro.usuario.email = dados.email;
+      if (dados.telefone) registro.usuario.telefone = dados.telefone;
+      if (dados.regiao) registro.usuario.regiao = dados.regiao;
     }
     if (step === 'finalizado') {
       registro.status = 'finalizado';
       registro.data_finalizacao = new Date().toISOString();
-      contadorRegistros++;
+      contadorRegistros = contadorRegistros + 1;
     }
   }
   
@@ -511,21 +572,37 @@ app.post('/api/checkout/step', async (req, res) => {
 
 // ===== ADMIN - ABANDONOS =====
 
-// Listar todos os registros
-app.get('/api/admin/abandonos', verificarToken, verificarAdmin, async (req, res) => {
+app.get('/api/admin/abandonos', verificarToken, verificarAdmin, function(req, res) {
+  var abandonados = [];
+  var finalizados = [];
+  
+  for (var i = 0; i < abandonos.length; i++) {
+    if (abandonos[i].status === 'abandonado') {
+      abandonados.push(abandonos[i]);
+    } else if (abandonos[i].status === 'finalizado') {
+      finalizados.push(abandonos[i]);
+    }
+  }
+  
   res.json({
-    abandonos: abandonos.filter(a => a.status === 'abandonado'),
-    finalizados: abandonos.filter(a => a.status === 'finalizado'),
+    abandonos: abandonados,
+    finalizados: finalizados,
     total: abandonos.length,
-    total_abandonos: abandonos.filter(a => a.status === 'abandonado').length,
-    total_finalizados: abandonos.filter(a => a.status === 'finalizado').length
+    total_abandonos: abandonados.length,
+    total_finalizados: finalizados.length
   });
 });
 
-// Excluir abandono individual
-app.delete('/api/admin/abandonos/:sessionId', verificarToken, verificarAdmin, async (req, res) => {
-  const { sessionId } = req.params;
-  const index = abandonos.findIndex(a => a.sessionId === sessionId);
+app.delete('/api/admin/abandonos/:sessionId', verificarToken, verificarAdmin, function(req, res) {
+  var sessionId = req.params.sessionId;
+  var index = -1;
+  
+  for (var i = 0; i < abandonos.length; i++) {
+    if (abandonos[i].sessionId === sessionId) {
+      index = i;
+      break;
+    }
+  }
   
   if (index === -1) {
     return res.status(404).json({ error: "Registro não encontrado" });
@@ -535,163 +612,189 @@ app.delete('/api/admin/abandonos/:sessionId', verificarToken, verificarAdmin, as
   res.json({ msg: "Registro excluído com sucesso" });
 });
 
-// Limpar todos os abandonos
-app.delete('/api/admin/abandonos/limpar', verificarToken, verificarAdmin, async (req, res) => {
-  const { tipo } = req.body; // 'todos', 'abandonados', 'finalizados'
+app.delete('/api/admin/abandonos/limpar', verificarToken, verificarAdmin, function(req, res) {
+  var tipo = req.body.tipo;
   
   if (tipo === 'todos') {
     abandonos.length = 0;
     contadorRegistros = 0;
   } else if (tipo === 'abandonados') {
-    const finalizados = abandonos.filter(a => a.status === 'finalizado');
+    var finalizados = [];
+    for (var i = 0; i < abandonos.length; i++) {
+      if (abandonos[i].status === 'finalizado') {
+        finalizados.push(abandonos[i]);
+      }
+    }
     abandonos.length = 0;
-    abandonos.push(...finalizados);
+    for (var j = 0; j < finalizados.length; j++) {
+      abandonos.push(finalizados[j]);
+    }
   } else if (tipo === 'finalizados') {
-    const abandonados = abandonos.filter(a => a.status === 'abandonado');
+    var abandonados = [];
+    for (var k = 0; k < abandonos.length; k++) {
+      if (abandonos[k].status === 'abandonado') {
+        abandonados.push(abandonos[k]);
+      }
+    }
     abandonos.length = 0;
-    abandonos.push(...abandonados);
+    for (var l = 0; l < abandonados.length; l++) {
+      abandonos.push(abandonados[l]);
+    }
   }
   
   res.json({ msg: "Registros limpos com sucesso" });
 });
 
-// Notificar cliente via WhatsApp
-app.post('/api/admin/notificar-whatsapp', verificarToken, verificarAdmin, async (req, res) => {
-  const { sessionId, mensagemPersonalizada } = req.body;
+app.post('/api/admin/notificar-whatsapp', verificarToken, verificarAdmin, function(req, res) {
+  var sessionId = req.body.sessionId;
+  var mensagemPersonalizada = req.body.mensagemPersonalizada;
   
-  const abandono = abandonos.find(a => a.sessionId === sessionId);
+  var abandono = null;
+  for (var i = 0; i < abandonos.length; i++) {
+    if (abandonos[i].sessionId === sessionId) {
+      abandono = abandonos[i];
+      break;
+    }
+  }
+  
   if (!abandono) {
     return res.status(404).json({ error: "Abandono não encontrado" });
   }
   
-  if (!abandono.usuario?.telefone || abandono.usuario.telefone === 'Não informado') {
+  if (!abandono.usuario || !abandono.usuario.telefone || abandono.usuario.telefone === 'Não informado') {
     return res.status(400).json({ error: "Usuário não tem telefone cadastrado" });
   }
   
-  let mensagem = mensagemPersonalizada || 
-    `🛍️ *JM Store - Carrinho Abandonado*\n\n` +
-    `Olá ${abandono.usuario.nome || 'cliente'}! 👋\n\n` +
-    `Vimos que você deixou alguns produtos no carrinho. Quer finalizar sua compra?\n\n` +
-    `📦 *Itens:*\n`;
+  var mensagem = mensagemPersonalizada || 
+    '🛍️ *JM Store - Carrinho Abandonado*\n\n' +
+    'Olá ' + (abandono.usuario.nome || 'cliente') + '! 👋\n\n' +
+    'Vimos que você deixou alguns produtos no carrinho. Quer finalizar sua compra?\n\n' +
+    '📦 *Itens:*\n';
   
-  abandono.itens.forEach(item => {
-    mensagem += `- ${item.nome} x${item.quantidade}: ${(item.preco * item.quantidade).toLocaleString('pt-PT')} KZ\n`;
-  });
+  if (abandono.itens) {
+    for (var j = 0; j < abandono.itens.length; j++) {
+      var item = abandono.itens[j];
+      mensagem = mensagem + '- ' + item.nome + ' x' + item.quantidade + ': ' + (item.preco * item.quantidade).toLocaleString('pt-PT') + ' KZ\n';
+    }
+  }
   
-  mensagem += `\n💰 *Total: ${abandono.total.toLocaleString('pt-PT')} KZ*\n\n`;
-  mensagem += `Acesse: ${process.env.STORE_URL || 'https://jm-store.vercel.app'}\n\n`;
-  mensagem += `*Responda esta mensagem para finalizar seu pedido!* 🚀`;
+  mensagem = mensagem + '\n💰 *Total: ' + (abandono.total || 0).toLocaleString('pt-PT') + ' KZ*\n\n';
+  mensagem = mensagem + 'Acesse: ' + (process.env.STORE_URL || 'https://jm-store.vercel.app') + '\n\n';
+  mensagem = mensagem + '*Responda esta mensagem para finalizar seu pedido!* 🚀';
   
-  const link = `https://wa.me/${abandono.usuario.telefone}?text=${encodeURIComponent(mensagem)}`;
+  var link = 'https://wa.me/' + abandono.usuario.telefone + '?text=' + encodeURIComponent(mensagem);
   
-  abandono.tentativas++;
+  abandono.tentativas = (abandono.tentativas || 0) + 1;
   abandono.ultimo_contato = new Date().toISOString();
   
   res.json({ 
     success: true, 
-    link,
-    mensagem,
+    link: link,
+    mensagem: mensagem,
     telefone: abandono.usuario.telefone
   });
 });
 
 // ===== ADMIN - PRODUTOS =====
 
-// Todos os produtos (admin)
-app.get('/api/admin/produtos', verificarToken, verificarAdmin, async (req, res) => {
+app.get('/api/admin/produtos', verificarToken, verificarAdmin, async function(req, res) {
   const { data, error } = await supabase
     .from('produtos')
     .select('*')
     .order('id');
-  if (error) return res.status(500).json({ error });
+  if (error) return res.status(500).json({ error: error });
   res.json(data);
 });
 
-// Criar produto
-app.post('/api/admin/produtos', verificarToken, verificarAdmin, async (req, res) => {
+app.post('/api/admin/produtos', verificarToken, verificarAdmin, async function(req, res) {
   const { data, error } = await supabase
     .from('produtos')
-    .insert([{ ...req.body, visivel: true }])
+    .insert([{ 
+      nome: req.body.nome, 
+      preco: req.body.preco, 
+      categoria: req.body.categoria, 
+      imagem: req.body.imagem, 
+      visivel: true 
+    }])
     .select();
-  if (error) return res.status(500).json({ error });
+  if (error) return res.status(500).json({ error: error });
   res.json(data[0]);
 });
 
-// Atualizar produto
-app.put('/api/admin/produtos/:id', verificarToken, verificarAdmin, async (req, res) => {
+app.put('/api/admin/produtos/:id', verificarToken, verificarAdmin, async function(req, res) {
   const { data, error } = await supabase
     .from('produtos')
-    .update(req.body)
+    .update({ 
+      nome: req.body.nome, 
+      preco: req.body.preco, 
+      categoria: req.body.categoria, 
+      imagem: req.body.imagem 
+    })
     .eq('id', req.params.id)
     .select();
-  if (error) return res.status(500).json({ error });
+  if (error) return res.status(500).json({ error: error });
   res.json(data[0]);
 });
 
-// Alternar visibilidade
-app.patch('/api/admin/produtos/:id/visibilidade', verificarToken, verificarAdmin, async (req, res) => {
-  const { visivel } = req.body;
+app.patch('/api/admin/produtos/:id/visibilidade', verificarToken, verificarAdmin, async function(req, res) {
+  var visivel = req.body.visivel;
   if (typeof visivel !== 'boolean') {
     return res.status(400).json({ error: 'visivel deve ser boolean' });
   }
   
   const { data, error } = await supabase
     .from('produtos')
-    .update({ visivel })
+    .update({ visivel: visivel })
     .eq('id', req.params.id)
     .select();
-  if (error) return res.status(500).json({ error });
+  if (error) return res.status(500).json({ error: error });
   res.json(data[0]);
 });
 
-// Deletar produto
-app.delete('/api/admin/produtos/:id', verificarToken, verificarAdmin, async (req, res) => {
+app.delete('/api/admin/produtos/:id', verificarToken, verificarAdmin, async function(req, res) {
   const { error } = await supabase
     .from('produtos')
     .delete()
     .eq('id', req.params.id);
-  if (error) return res.status(500).json({ error });
+  if (error) return res.status(500).json({ error: error });
   res.json({ msg: "Produto deletado" });
 });
 
-// ===== UPLOAD DE IMAGENS (CACHE EM MEMÓRIA) =====
+// ===== UPLOAD DE IMAGENS =====
 
-app.post('/api/admin/upload', verificarToken, verificarAdmin, upload.single('imagem'), async (req, res) => {
+app.post('/api/admin/upload', verificarToken, verificarAdmin, upload.single('imagem'), async function(req, res) {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'Nenhuma imagem' });
     }
 
-    // Otimiza a imagem
-    const buffer = await sharp(req.file.buffer)
+    var buffer = await sharp(req.file.buffer)
       .resize(800, 800, { fit: 'cover', withoutEnlargement: true })
       .jpeg({ quality: 80 })
       .toBuffer();
 
-    // Gera ID único e salva em cache
-    const id = ++contadorImagens;
-    const nome = `img_${id}_${Date.now()}.jpg`;
+    var id = ++contadorImagens;
+    var nome = 'img_' + id + '_' + Date.now() + '.jpg';
     
     cacheImagens.set(id, {
-      buffer,
+      buffer: buffer,
       mimeType: 'image/jpeg',
-      nome,
+      nome: nome,
       tamanho: buffer.length,
       criado_em: new Date().toISOString()
     });
 
-    const url = `${req.protocol}://${req.get('host')}/api/imagem/${id}`;
-    res.json({ success: true, url, id });
+    var url = req.protocol + '://' + req.get('host') + '/api/imagem/' + id;
+    res.json({ success: true, url: url, id: id });
   } catch (error) {
     console.error('Erro upload:', error);
     res.status(500).json({ error: 'Erro ao fazer upload' });
   }
 });
 
-// Servir imagem do cache
-app.get('/api/imagem/:id', (req, res) => {
-  const id = parseInt(req.params.id);
-  const imagem = cacheImagens.get(id);
+app.get('/api/imagem/:id', function(req, res) {
+  var id = parseInt(req.params.id);
+  var imagem = cacheImagens.get(id);
   if (!imagem) {
     return res.status(404).json({ error: 'Imagem não encontrada' });
   }
@@ -702,31 +805,35 @@ app.get('/api/imagem/:id', (req, res) => {
 
 // ===== CHECKOUT =====
 
-app.post('/api/checkout', verificarToken, async (req, res) => {
-  const usuario_id = req.usuario.id;
-  const { itens, endereco, metodo_pagamento, sessionId } = req.body;
+app.post('/api/checkout', verificarToken, async function(req, res) {
+  var usuario_id = req.usuario.id;
+  var itens = req.body.itens;
+  var endereco = req.body.endereco;
+  var metodo_pagamento = req.body.metodo_pagamento;
+  var sessionId = req.body.sessionId;
   
   if (!itens || itens.length === 0) {
     return res.status(400).json({ error: "Carrinho vazio" });
   }
 
-  // Busca dados do usuário
   const { data: usuario } = await supabase
     .from('usuarios')
     .select('nome, telefone, regiao, email')
     .eq('id', usuario_id)
     .single();
 
-  const total = itens.reduce((s, i) => s + i.preco * i.quantidade, 0);
+  var total = 0;
+  for (var i = 0; i < itens.length; i++) {
+    total = total + itens[i].preco * itens[i].quantidade;
+  }
   
-  // Cria pedido
   const { data: pedido, error: erroPedido } = await supabase
     .from('pedidos')
     .insert([{ 
-      usuario_id, 
-      total, 
+      usuario_id: usuario_id, 
+      total: total, 
       status: 'Aguardando WhatsApp',
-      endereco: endereco || usuario?.regiao || 'Não informado',
+      endereco: endereco || (usuario ? usuario.regiao : 'Não informado'),
       metodo_pagamento: metodo_pagamento || 'WhatsApp',
       data_pedido: new Date().toISOString()
     }])
@@ -738,27 +845,33 @@ app.post('/api/checkout', verificarToken, async (req, res) => {
     return res.status(500).json({ error: "Erro ao criar pedido" });
   }
 
-  // Salva itens do pedido
-  const itensPedido = itens.map(i => ({
-    pedido_id: pedido.id,
-    produto_id: i.id,
-    quantidade: i.quantidade,
-    preco_unitario: i.preco
-  }));
+  var itensPedido = [];
+  for (var j = 0; j < itens.length; j++) {
+    itensPedido.push({
+      pedido_id: pedido.id,
+      produto_id: itens[j].id,
+      quantidade: itens[j].quantidade,
+      preco_unitario: itens[j].preco
+    });
+  }
   
   await supabase
     .from('itens_pedido')
     .insert(itensPedido);
 
-  // Limpa carrinho
   await supabase
     .from('carrinho')
     .delete()
     .eq('usuario_id', usuario_id);
 
-  // Atualiza abandono se existir
   if (sessionId) {
-    const abandono = abandonos.find(a => a.sessionId === sessionId);
+    var abandono = null;
+    for (var k = 0; k < abandonos.length; k++) {
+      if (abandono[k] && abandonos[k].sessionId === sessionId) {
+        abandono = abandonos[k];
+        break;
+      }
+    }
     if (abandono) {
       abandono.status = 'finalizado';
       abandono.data_finalizacao = new Date().toISOString();
@@ -766,38 +879,38 @@ app.post('/api/checkout', verificarToken, async (req, res) => {
     }
   }
 
-  // VERIFICA SE DEVE ENVIAR EMAIL (a cada 5 registros)
-  const totalRegistros = abandonos.length;
-  if (totalRegistros > 0 && totalRegistros % LIMITE_NOTIFICACAO === 0) {
-    const ultimosRegistros = abandonos.slice(-LIMITE_NOTIFICACAO);
-    enviarEmailNotificacao(ultimosRegistros).catch(console.error);
+  // VERIFICA SE DEVE ENVIAR EMAIL
+  if (abandonos.length > 0 && abandonos.length % LIMITE_NOTIFICACAO === 0) {
+    var ultimosRegistros = abandonos.slice(-LIMITE_NOTIFICACAO);
+    enviarEmailNotificacao(ultimosRegistros).catch(function(err) { console.error(err); });
   }
 
   // MENSAGEM WHATSAPP
-  let msg = `*🛍️ NOVO PEDIDO JM STORE #${pedido.id}*\n\n`;
-  msg += `👤 *Cliente:* ${usuario?.nome || 'Não informado'}\n`;
-  msg += `📧 *Email:* ${usuario?.email || 'Não informado'}\n`;
-  msg += `📱 *Telefone:* ${usuario?.telefone || 'Não informado'}\n`;
-  msg += `📍 *Região:* ${usuario?.regiao || 'Não informado'}\n`;
-  msg += `📦 *Endereço:* ${endereco || usuario?.regiao || 'Não informado'}\n\n`;
-  msg += `*📋 ITENS DO PEDIDO:*\n`;
+  var msg = '*🛍️ NOVO PEDIDO JM STORE #' + pedido.id + '*\n\n';
+  msg = msg + '👤 *Cliente:* ' + (usuario ? usuario.nome : 'Não informado') + '\n';
+  msg = msg + '📧 *Email:* ' + (usuario ? usuario.email : 'Não informado') + '\n';
+  msg = msg + '📱 *Telefone:* ' + (usuario ? usuario.telefone : 'Não informado') + '\n';
+  msg = msg + '📍 *Região:* ' + (usuario ? usuario.regiao : 'Não informado') + '\n';
+  msg = msg + '📦 *Endereço:* ' + (endereco || (usuario ? usuario.regiao : 'Não informado')) + '\n\n';
+  msg = msg + '*📋 ITENS DO PEDIDO:*\n';
   
-  itens.forEach((i, idx) => {
-    msg += `${idx + 1}. ${i.nome} x${i.quantidade} = ${(i.preco * i.quantidade).toLocaleString('pt-PT')} KZ\n`;
-  });
+  for (var l = 0; l < itens.length; l++) {
+    var item3 = itens[l];
+    msg = msg + (l + 1) + '. ' + item3.nome + ' x' + item3.quantidade + ' = ' + (item3.preco * item3.quantidade).toLocaleString('pt-PT') + ' KZ\n';
+  }
   
-  msg += `\n*💰 TOTAL: ${total.toLocaleString('pt-PT')} KZ*`;
-  msg += `\n💳 *Pagamento:* ${metodo_pagamento || 'WhatsApp'}`;
-  msg += `\n\n🔗 *Pedido #${pedido.id}*`;
+  msg = msg + '\n*💰 TOTAL: ' + total.toLocaleString('pt-PT') + ' KZ*';
+  msg = msg + '\n💳 *Pagamento:* ' + (metodo_pagamento || 'WhatsApp');
+  msg = msg + '\n\n🔗 *Pedido #' + pedido.id + '*';
   
-  const link = `https://wa.me/${NUMERO_WHATSAPP_JM}?text=${encodeURIComponent(msg)}`;
+  var link = 'https://wa.me/' + NUMERO_WHATSAPP_JM + '?text=' + encodeURIComponent(msg);
   
   res.json({ 
-    link, 
+    link: link, 
     pedido_id: pedido.id,
     pedido: {
       id: pedido.id,
-      total,
+      total: total,
       status: pedido.status,
       data: pedido.data_pedido
     }
@@ -806,45 +919,45 @@ app.post('/api/checkout', verificarToken, async (req, res) => {
 
 // ===== DASHBOARD ADMIN =====
 
-app.get('/api/admin/dashboard', verificarToken, verificarAdmin, async (req, res) => {
+app.get('/api/admin/dashboard', verificarToken, verificarAdmin, async function(req, res) {
   try {
-    // Total de produtos
     const { count: totalProdutos } = await supabase
       .from('produtos')
       .select('*', { count: 'exact', head: true });
     
-    // Total de pedidos
     const { count: totalPedidos } = await supabase
       .from('pedidos')
       .select('*', { count: 'exact', head: true });
     
-    // Total de usuários
     const { count: totalUsuarios } = await supabase
       .from('usuarios')
       .select('*', { count: 'exact', head: true });
     
-    // Pedidos recentes    const { data: pedidosRecentes } = await supabase
+    const { data: pedidosRecentes } = await supabase
       .from('pedidos')
-      .select(`
-        *,
-        usuarios (nome, email, telefone)
-      `)
+      .select('*, usuarios (nome, email, telefone)')
       .order('data_pedido', { ascending: false })
       .limit(5);
     
-    // Estatísticas de abandonos
-    const totalAbandonos = abandonos.filter(a => a.status === 'abandonado').length;
-    const totalFinalizados = abandonos.filter(a => a.status === 'finalizado').length;
+    var totalAbandonos = 0;
+    var totalFinalizados = 0;
+    for (var i = 0; i < abandonos.length; i++) {
+      if (abandonos[i].status === 'abandonado') {
+        totalAbandonos = totalAbandonos + 1;
+      } else if (abandonos[i].status === 'finalizado') {
+        totalFinalizados = totalFinalizados + 1;
+      }
+    }
     
     res.json({
       stats: {
-        totalProdutos,
-        totalPedidos,
-        totalUsuarios,
-        totalAbandonos,
-        totalFinalizados
+        totalProdutos: totalProdutos || 0,
+        totalPedidos: totalPedidos || 0,
+        totalUsuarios: totalUsuarios || 0,
+        totalAbandonos: totalAbandonos,
+        totalFinalizados: totalFinalizados
       },
-      pedidosRecentes
+      pedidosRecentes: pedidosRecentes || []
     });
   } catch (error) {
     console.error('Erro dashboard:', error);
@@ -854,7 +967,7 @@ app.get('/api/admin/dashboard', verificarToken, verificarAdmin, async (req, res)
 
 // ===== INICIAR SERVIDOR =====
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 JM Server rodando na porta ${PORT}`);
-  console.log(`📊 API URL: http://localhost:${PORT}/api/produtos`);
+app.listen(PORT, function() {
+  console.log('🚀 JM Server rodando na porta ' + PORT);
+  console.log('📊 API URL: http://localhost:' + PORT + '/api/produtos');
 });
