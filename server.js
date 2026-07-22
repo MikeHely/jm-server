@@ -29,7 +29,7 @@ app.post('/api/login', async function(req, res) {
   
   if (error) {
     console.log('❌ Erro no Supabase:', error);
-    return res.status(401).json({ error: "Email ou senha inválidos" });
+    return res.status(401).json({ error: "Erro Inesperado" });
   }
   
   if (!data) {
@@ -45,7 +45,7 @@ app.post('/api/login', async function(req, res) {
   
   if (!senhaCorreta) {
     console.log('❌ Senha inválida para:', email);
-    return res.status(401).json({ error: "Email ou senha inválidos" });
+    return res.status(401).json({ error: "Senha inválida" });
   }
   // ... resto
 });
