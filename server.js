@@ -14,81 +14,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-
-app.post('/api/login', async function(req, res) {
-  var email = req.body.email;
-  var senha = req.body.senha;
-  
-  console.log('🔐 Tentativa de login:', email);
-  
-  const { data, error } = await supabase
-    .from('usuarios')
-    .select('*')
-    .eq('email', email)
-    .single();
-  
-  if (error) {
-    console.log('❌ Erro no Supabase:', error);
-    return res.status(401).json({ error: "Erro Inesperado" });
-  }
-  
-  if (!data) {
-    console.log('❌ Usuário não encontrado:', email);
-    return res.status(401).json({ error: "Email ou senha " });
-  }
-  
-  console.log('✅ Usuário encontrado:', data.email, 'is_admin:', data.is_admin);
-  console.log('🔑 Hash guardado:', data.senha.substring(0, 20) + '...');
-  
-  var senhaCorreta = true;
-  console.log('🔐 Senha correta?', senhaCorreta);
-console.log('🔐 Senha digitada', senha.substring(0, 20));
-  console.log('🔐 Senha guardada', data.senha.substring(0, 20));
-  
-  if (!senhaCorreta) {
-    console.log('❌ Senha inválida para:', email);
-    return res.status(401).json({ error: "Senha inválida" });
-  }
-  // ... resto
-});
-
-
-// Login
-app.post('/api/login', async function(req, res) {
-  var email = req.body.email;
-  var senha = req.body.senha;
-  
-  const { data } = await supabase
-    .from('usuarios')
-    .select('*')
-    .eq('email', email)
-    .single();
-  
-  if (!data) {
-    return res.status(401).json({ error: "Email ou senha inválidos" });
-  }
-  
-  var senhaCorreta = await bcrypt.compare(senha, data.senha);
-  if (!senhaCorreta) {
-    return res.status(401).json({ error: "Email ou senha inválidos" });
-  }
-
-  var usuario = { 
-    id: data.id, 
-    email: data.email, 
-    nome: data.nome,
-    telefone: data.telefone,
-    regiao: data.regiao,
-    is_admin: !!data.is_admin 
-  };
-  
-  var token = jwt.sign(usuario, JWT_SECRET, { expiresIn: '7d' });
-
-  res.json({ msg: "Logado", user: usuario, token: token });
-});
-
-
-
 // ===== CONFIGURAÇÕES =====
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
@@ -337,9 +262,72 @@ async function enviarEmailNotificacao(novosRegistros) {
   }
 }
 
-// ===== ROTAS PÚBLICAS =====
+// ============================================
+// 🔥 ROTA DE LOGIN - ÚNICA E CORRIGIDA
+// ============================================
+app.post('/api/login', async function(req, res) {
+  var email = req.body.email;
+  var senha = req.body.senha;
+  
+  console.log('🔐 Tentativa de login:', email);
+  
+  // Buscar usuário no Supabase
+  const { data, error } = await supabase
+    .from('usuarios')
+    .select('*')
+    .eq('email', email)
+    .single();
+  
+  if (error) {
+    console.log('❌ Erro no Supabase:', error);
+    return res.status(401).json({ error: "Erro ao buscar usuário" });
+  }
+  
+  if (!data) {
+    console.log('❌ Usuário não encontrado:', email);
+    return res.status(401).json({ error: "Email ou senha inválidos" });
+  }
+  
+  console.log('✅ Usuário encontrado:', data.email, 'is_admin:', data.is_admin);
+  console.log('🔑 Hash guardado:', data.senha.substring(0, 20) + '...');
+  
+  // Comparar senha
+  var senhaCorreta = await bcrypt.compare(senha, data.senha);
+  console.log('🔐 Senha correta?', senhaCorreta);
+  
+  if (!senhaCorreta) {
+    console.log('❌ Senha inválida para:', email);
+    return res.status(401).json({ error: "Email ou senha inválidos" });
+  }
 
-// Produtos públicos (apenas visíveis)
+  // Criar objeto usuário para o token
+  var usuario = { 
+    id: data.id, 
+    email: data.email, 
+    nome: data.nome,
+    telefone: data.telefone,
+    regiao: data.regiao,
+    is_admin: !!data.is_admin 
+  };
+  
+  // Gerar token JWT
+  var token = jwt.sign(usuario, JWT_SECRET, { expiresIn: '7d' });
+  
+  console.log('✅ Login bem-sucedido para:', email);
+  
+  // Retornar resposta
+  res.json({ 
+    msg: "Logado com sucesso!", 
+    user: usuario, 
+    token: token 
+  });
+});
+
+// ============================================
+// RESTO DAS ROTAS (mantidas iguais)
+// ============================================
+
+// Produtos públicos
 app.get('/api/produtos', async function(req, res) {
   const { data, error } = await supabase
     .from('produtos')
@@ -370,9 +358,7 @@ app.get('/api/categorias', async function(req, res) {
   res.json(categorias);
 });
 
-// ===== USUÁRIOS =====
-
-// Registro completo
+// Registro
 app.post('/api/register', async function(req, res) {
   var email = req.body.email;
   var password = req.body.password;
@@ -420,7 +406,6 @@ app.post('/api/register', async function(req, res) {
   });
 });
 
-
 // Buscar perfil
 app.get('/api/usuario/perfil', verificarToken, async function(req, res) {
   const { data, error } = await supabase
@@ -450,8 +435,6 @@ app.put('/api/usuario/perfil', verificarToken, async function(req, res) {
 });
 
 // ===== CARRINHO =====
-
-// Salvar carrinho
 app.post('/api/carrinho', verificarToken, async function(req, res) {
   var itens = req.body.itens;
   var usuario_id = req.usuario.id;
@@ -486,7 +469,6 @@ app.post('/api/carrinho', verificarToken, async function(req, res) {
   res.json({ msg: "Carrinho salvo" });
 });
 
-// Buscar carrinho
 app.get('/api/carrinho', verificarToken, async function(req, res) {
   var usuario_id = req.usuario.id;
   
@@ -511,7 +493,6 @@ app.get('/api/carrinho', verificarToken, async function(req, res) {
 });
 
 // ===== PEDIDOS =====
-
 app.get('/api/pedidos', verificarToken, async function(req, res) {
   const { data, error } = await supabase
     .from('pedidos')
@@ -528,7 +509,6 @@ app.get('/api/pedidos', verificarToken, async function(req, res) {
 });
 
 // ===== RASTREIO DE ABANDONO =====
-
 app.post('/api/checkout/registrar', async function(req, res) {
   var sessionId = req.body.sessionId;
   var usuario = req.body.usuario;
@@ -613,7 +593,6 @@ app.post('/api/checkout/step', async function(req, res) {
 });
 
 // ===== ADMIN - ABANDONOS =====
-
 app.get('/api/admin/abandonos', verificarToken, verificarAdmin, function(req, res) {
   var abandonados = [];
   var finalizados = [];
@@ -738,7 +717,6 @@ app.post('/api/admin/notificar-whatsapp', verificarToken, verificarAdmin, functi
 });
 
 // ===== ADMIN - PRODUTOS =====
-
 app.get('/api/admin/produtos', verificarToken, verificarAdmin, async function(req, res) {
   const { data, error } = await supabase
     .from('produtos')
@@ -803,7 +781,6 @@ app.delete('/api/admin/produtos/:id', verificarToken, verificarAdmin, async func
 });
 
 // ===== UPLOAD DE IMAGENS =====
-
 app.post('/api/admin/upload', verificarToken, verificarAdmin, upload.single('imagem'), async function(req, res) {
   try {
     if (!req.file) {
@@ -846,7 +823,6 @@ app.get('/api/imagem/:id', function(req, res) {
 });
 
 // ===== CHECKOUT =====
-
 app.post('/api/checkout', verificarToken, async function(req, res) {
   var usuario_id = req.usuario.id;
   var itens = req.body.itens;
@@ -909,7 +885,7 @@ app.post('/api/checkout', verificarToken, async function(req, res) {
   if (sessionId) {
     var abandono = null;
     for (var k = 0; k < abandonos.length; k++) {
-      if (abandono[k] && abandonos[k].sessionId === sessionId) {
+      if (abandonos[k] && abandonos[k].sessionId === sessionId) {
         abandono = abandonos[k];
         break;
       }
@@ -960,7 +936,6 @@ app.post('/api/checkout', verificarToken, async function(req, res) {
 });
 
 // ===== DASHBOARD ADMIN =====
-
 app.get('/api/admin/dashboard', verificarToken, verificarAdmin, async function(req, res) {
   try {
     const { count: totalProdutos } = await supabase
