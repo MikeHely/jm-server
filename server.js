@@ -34,14 +34,16 @@ app.post('/api/login', async function(req, res) {
   
   if (!data) {
     console.log('❌ Usuário não encontrado:', email);
-    return res.status(401).json({ error: "Email ou senha inválidos" });
+    return res.status(401).json({ error: "Email ou senha " });
   }
   
   console.log('✅ Usuário encontrado:', data.email, 'is_admin:', data.is_admin);
   console.log('🔑 Hash guardado:', data.senha.substring(0, 20) + '...');
   
   var senhaCorreta = await bcrypt.compare(senha, data.senha);
-  console.log('🔐 Senha correta?', true);
+  console.log('🔐 Senha correta?', senhaCorreta);
+console.log('🔐 Senha digitada', senha.substring(0, 20));
+  console.log('🔐 Senha guardada', data.senha.substring(0, 20));
   
   if (!senhaCorreta) {
     console.log('❌ Senha inválida para:', email);
@@ -49,6 +51,43 @@ app.post('/api/login', async function(req, res) {
   }
   // ... resto
 });
+
+
+// Login
+app.post('/api/login', async function(req, res) {
+  var email = req.body.email;
+  var senha = req.body.senha;
+  
+  const { data } = await supabase
+    .from('usuarios')
+    .select('*')
+    .eq('email', email)
+    .single();
+  
+  if (!data) {
+    return res.status(401).json({ error: "Email ou senha inválidos" });
+  }
+  
+  var senhaCorreta = await bcrypt.compare(senha, data.senha);
+  if (!senhaCorreta) {
+    return res.status(401).json({ error: "Email ou senha inválidos" });
+  }
+
+  var usuario = { 
+    id: data.id, 
+    email: data.email, 
+    nome: data.nome,
+    telefone: data.telefone,
+    regiao: data.regiao,
+    is_admin: !!data.is_admin 
+  };
+  
+  var token = jwt.sign(usuario, JWT_SECRET, { expiresIn: '7d' });
+
+  res.json({ msg: "Logado", user: usuario, token: token });
+});
+
+
 
 // ===== CONFIGURAÇÕES =====
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -381,39 +420,6 @@ app.post('/api/register', async function(req, res) {
   });
 });
 
-// Login
-app.post('/api/login', async function(req, res) {
-  var email = req.body.email;
-  var senha = req.body.senha;
-  
-  const { data } = await supabase
-    .from('usuarios')
-    .select('*')
-    .eq('email', email)
-    .single();
-  
-  if (!data) {
-    return res.status(401).json({ error: "Email ou senha inválidos" });
-  }
-  
-  var senhaCorreta = await bcrypt.compare(senha, data.senha);
-  if (!senhaCorreta) {
-    return res.status(401).json({ error: "Email ou senha inválidos" });
-  }
-
-  var usuario = { 
-    id: data.id, 
-    email: data.email, 
-    nome: data.nome,
-    telefone: data.telefone,
-    regiao: data.regiao,
-    is_admin: !!data.is_admin 
-  };
-  
-  var token = jwt.sign(usuario, JWT_SECRET, { expiresIn: '7d' });
-
-  res.json({ msg: "Logado", user: usuario, token: token });
-});
 
 // Buscar perfil
 app.get('/api/usuario/perfil', verificarToken, async function(req, res) {
