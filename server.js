@@ -89,7 +89,9 @@ const upload = multer({
   }
 });
 
-// ===== FUNÇÃO PARA ENVIAR EMAIL =====
+// ============================================
+// FUNÇÃO PARA ENVIAR EMAIL
+// ============================================
 async function enviarEmailNotificacao(novosRegistros) {
   if (!transporter) {
     console.log('⚠️ Email não enviado: transporte não configurado');
@@ -116,9 +118,6 @@ async function enviarEmailNotificacao(novosRegistros) {
           .status-finalizado { background: #D1FAE5; color: #065F46; }
           .total { font-size: 24px; font-weight: bold; color: #16A34A; text-align: right; }
           .footer { margin-top: 20px; text-align: center; color: #666; font-size: 12px; border-top: 1px solid #ddd; padding-top: 20px; }
-          table { width: 100%; border-collapse: collapse; margin: 10px 0; }
-          th { background: #1E3A8A; color: white; padding: 8px; text-align: left; font-size: 12px; }
-          td { padding: 8px; border-bottom: 1px solid #ddd; font-size: 13px; }
           .botao-admin { 
             display: inline-block; 
             background: #1E3A8A; 
@@ -263,71 +262,76 @@ async function enviarEmailNotificacao(novosRegistros) {
 }
 
 // ============================================
-// 🔥 ROTA DE LOGIN - ÚNICA E CORRIGIDA
+// COLETAR CONTATOS PARA MARKETING
 // ============================================
-app.post('/api/login', async function(req, res) {
-  var email = req.body.email;
-  var senha = req.body.senha;
-  
-  console.log('🔐 Tentativa de login:', email);
-  
-  // Buscar usuário no Supabase
-  const { data, error } = await supabase
-    .from('usuarios')
-    .select('*')
-    .eq('email', email)
-    .single();
-  
-  if (error) {
-    console.log('❌ Erro no Supabase:', error);
-    return res.status(401).json({ error: "Erro ao buscar usuário" });
+async function coletarContatosMarketing() {
+  try {
+    // Buscar usuários cadastrados
+    const { data: usuarios } = await supabase
+      .from('usuarios')
+      .select('id, email, nome, telefone, regiao, data_cadastro')
+      .not('email', 'is', null);
+    
+    if (usuarios) {
+      for (const user of usuarios) {
+        const { data: existente } = await supabase
+          .from('contatos_marketing')
+          .select('id')
+          .eq('email', user.email)
+          .single();
+        
+        if (!existente) {
+          await supabase
+            .from('contatos_marketing')
+            .insert([{
+              email: user.email,
+              telefone: user.telefone,
+              nome: user.nome,
+              regiao: user.regiao,
+              origem: 'cadastro',
+              data_coleta: user.data_cadastro || new Date().toISOString()
+            }]);
+        }
+      }
+    }
+    
+    // Buscar carrinhos abandonados
+    for (const abandono of abandonos) {
+      if (abandono.usuario && abandono.usuario.email) {
+        const { data: existente } = await supabase
+          .from('contatos_marketing')
+          .select('id')
+          .eq('email', abandono.usuario.email)
+          .single();
+        
+        if (!existente) {
+          await supabase
+            .from('contatos_marketing')
+            .insert([{
+              email: abandono.usuario.email,
+              telefone: abandono.usuario.telefone,
+              nome: abandono.usuario.nome || 'Visitante',
+              regiao: abandono.usuario.regiao,
+              origem: 'abandono',
+              data_coleta: new Date().toISOString()
+            }]);
+        }
+      }
+    }
+    
+    console.log('✅ Coleta de contatos para marketing concluída');
+  } catch (error) {
+    console.error('❌ Erro na coleta de contatos:', error);
   }
-  
-  if (!data) {
-    console.log('❌ Usuário não encontrado:', email);
-    return res.status(401).json({ error: "Email ou senha inválidos" });
-  }
-  
-  console.log('✅ Usuário encontrado:', data.email, 'is_admin:', data.is_admin);
-  console.log('🔑 Hash guardado:', data.senha.substring(0, 20) + '...');
-  
-  // Comparar senha
-  var senhaCorreta = await bcrypt.compare(senha, data.senha);
-  console.log('🔐 Senha correta?', senhaCorreta);
-  
-  if (!senhaCorreta) {
-    console.log('❌ Senha inválida para:', email);
-    return res.status(401).json({ error: "Email ou senha inválidos" });
-  }
+}
 
-  // Criar objeto usuário para o token
-  var usuario = { 
-    id: data.id, 
-    email: data.email, 
-    nome: data.nome,
-    telefone: data.telefone,
-    regiao: data.regiao,
-    is_admin: !!data.is_admin 
-  };
-  
-  // Gerar token JWT
-  var token = jwt.sign(usuario, JWT_SECRET, { expiresIn: '7d' });
-  
-  console.log('✅ Login bem-sucedido para:', email);
-  
-  // Retornar resposta
-  res.json({ 
-    msg: "Logado com sucesso!", 
-    user: usuario, 
-    token: token 
-  });
-});
+// Executar coleta a cada hora
+setInterval(coletarContatosMarketing, 3600000);
 
 // ============================================
-// RESTO DAS ROTAS (mantidas iguais)
+// ROTAS PÚBLICAS
 // ============================================
 
-// Produtos públicos
 app.get('/api/produtos', async function(req, res) {
   const { data, error } = await supabase
     .from('produtos')
@@ -338,7 +342,6 @@ app.get('/api/produtos', async function(req, res) {
   res.json(data);
 });
 
-// Categorias
 app.get('/api/categorias', async function(req, res) {
   const { data, error } = await supabase
     .from('produtos')
@@ -358,10 +361,55 @@ app.get('/api/categorias', async function(req, res) {
   res.json(categorias);
 });
 
-// Registro
+// ============================================
+// PRODUTOS - DETALHES
+// ============================================
+app.get('/api/produtos/:id', async function(req, res) {
+  try {
+    const { data: produto, error: errProduto } = await supabase
+      .from('produtos')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+    
+    if (errProduto) return res.status(404).json({ error: 'Produto não encontrado' });
+    
+    const { data: imagens, error: errImagens } = await supabase
+      .from('imagens_produtos')
+      .select('*')
+      .eq('produto_id', req.params.id)
+      .order('ordem');
+    
+    const { data: avaliacoes, error: errAval } = await supabase
+      .from('avaliacoes')
+      .select('*, usuarios(nome)')
+      .eq('produto_id', req.params.id)
+      .order('data_criacao', { ascending: false });
+    
+    const { data: relacionados, error: errRel } = await supabase
+      .from('produtos')
+      .select('*')
+      .eq('categoria', produto.categoria)
+      .neq('id', produto.id)
+      .limit(4);
+    
+    res.json({
+      ...produto,
+      imagens: imagens || [],
+      avaliacoes: avaliacoes || [],
+      relacionados: relacionados || []
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// USUÁRIOS
+// ============================================
 app.post('/api/register', async function(req, res) {
   var email = req.body.email;
-  var password = req.body.password;
+  var password = req.body.password || req.body.senha;
   var nome = req.body.nome;
   var telefone = req.body.telefone;
   var regiao = req.body.regiao;
@@ -400,13 +448,57 @@ app.post('/api/register', async function(req, res) {
     return res.status(400).json({ error: "Erro ao cadastrar" });
   }
   
+  // Adicionar à lista de marketing
+  await supabase
+    .from('contatos_marketing')
+    .insert([{
+      email: email,
+      telefone: telefone,
+      nome: nome,
+      regiao: regiao,
+      origem: 'cadastro',
+      data_coleta: new Date().toISOString()
+    }]);
+  
   res.json({ 
     msg: "Usuário criado com sucesso!",
     user: { id: data[0].id, email: email, nome: nome }
   });
 });
 
-// Buscar perfil
+app.post('/api/login', async function(req, res) {
+  var email = req.body.email;
+  var senha = req.body.senha;
+  
+  const { data } = await supabase
+    .from('usuarios')
+    .select('*')
+    .eq('email', email)
+    .single();
+  
+  if (!data) {
+    return res.status(401).json({ error: "Email ou senha inválidos" });
+  }
+  
+  var senhaCorreta = await bcrypt.compare(senha, data.senha);
+  if (!senhaCorreta) {
+    return res.status(401).json({ error: "Email ou senha inválidos" });
+  }
+
+  var usuario = { 
+    id: data.id, 
+    email: data.email, 
+    nome: data.nome,
+    telefone: data.telefone,
+    regiao: data.regiao,
+    is_admin: !!data.is_admin 
+  };
+  
+  var token = jwt.sign(usuario, JWT_SECRET, { expiresIn: '7d' });
+
+  res.json({ msg: "Logado", user: usuario, token: token });
+});
+
 app.get('/api/usuario/perfil', verificarToken, async function(req, res) {
   const { data, error } = await supabase
     .from('usuarios')
@@ -418,7 +510,6 @@ app.get('/api/usuario/perfil', verificarToken, async function(req, res) {
   res.json(data);
 });
 
-// Atualizar perfil
 app.put('/api/usuario/perfil', verificarToken, async function(req, res) {
   var nome = req.body.nome;
   var telefone = req.body.telefone;
@@ -434,7 +525,9 @@ app.put('/api/usuario/perfil', verificarToken, async function(req, res) {
   res.json(data[0]);
 });
 
-// ===== CARRINHO =====
+// ============================================
+// CARRINHO
+// ============================================
 app.post('/api/carrinho', verificarToken, async function(req, res) {
   var itens = req.body.itens;
   var usuario_id = req.usuario.id;
@@ -492,7 +585,9 @@ app.get('/api/carrinho', verificarToken, async function(req, res) {
   res.json(itens);
 });
 
-// ===== PEDIDOS =====
+// ============================================
+// PEDIDOS
+// ============================================
 app.get('/api/pedidos', verificarToken, async function(req, res) {
   const { data, error } = await supabase
     .from('pedidos')
@@ -508,7 +603,148 @@ app.get('/api/pedidos', verificarToken, async function(req, res) {
   res.json(data);
 });
 
-// ===== RASTREIO DE ABANDONO =====
+app.get('/api/pedidos/:id/rastreio', verificarToken, async function(req, res) {
+  const { data, error } = await supabase
+    .from('pedidos')
+    .select('codigo_rastreio, transportadora, status, status_atualizado_em, historico_rastreio')
+    .eq('id', req.params.id)
+    .eq('usuario_id', req.usuario.id)
+    .single();
+  
+  if (error) return res.status(404).json({ error: 'Pedido não encontrado' });
+  res.json(data);
+});
+
+// ============================================
+// CHECKOUT
+// ============================================
+app.post('/api/checkout', verificarToken, async function(req, res) {
+  var usuario_id = req.usuario.id;
+  var itens = req.body.itens;
+  var endereco = req.body.endereco;
+  var metodo_pagamento = req.body.metodo_pagamento;
+  var sessionId = req.body.sessionId;
+  
+  if (!itens || itens.length === 0) {
+    return res.status(400).json({ error: "Carrinho vazio" });
+  }
+
+  const { data: usuario } = await supabase
+    .from('usuarios')
+    .select('nome, telefone, regiao, email')
+    .eq('id', usuario_id)
+    .single();
+
+  var total = 0;
+  for (var i = 0; i < itens.length; i++) {
+    total = total + itens[i].preco * itens[i].quantidade;
+  }
+  
+  const { data: pedido, error: erroPedido } = await supabase
+    .from('pedidos')
+    .insert([{ 
+      usuario_id: usuario_id, 
+      total: total, 
+      status: 'Aguardando WhatsApp',
+      endereco: endereco || (usuario ? usuario.regiao : 'Não informado'),
+      metodo_pagamento: metodo_pagamento || 'WhatsApp',
+      data_pedido: new Date().toISOString()
+    }])
+    .select()
+    .single();
+  
+  if (erroPedido) {
+    console.error('Erro criar pedido:', erroPedido);
+    return res.status(500).json({ error: "Erro ao criar pedido" });
+  }
+
+  var itensPedido = [];
+  for (var j = 0; j < itens.length; j++) {
+    itensPedido.push({
+      pedido_id: pedido.id,
+      produto_id: itens[j].id,
+      quantidade: itens[j].quantidade,
+      preco_unitario: itens[j].preco
+    });
+  }
+  
+  await supabase
+    .from('itens_pedido')
+    .insert(itensPedido);
+
+  await supabase
+    .from('carrinho')
+    .delete()
+    .eq('usuario_id', usuario_id);
+
+  // Atualizar contatos de marketing
+  await supabase
+    .from('contatos_marketing')
+    .upsert({
+      email: usuario.email,
+      telefone: usuario.telefone,
+      nome: usuario.nome,
+      regiao: usuario.regiao,
+      origem: 'checkout',
+      total_compras: supabase.raw('total_compras + 1'),
+      total_gasto: supabase.raw(`total_gasto + ${total}`),
+      ultimo_contato: new Date().toISOString()
+    }, { onConflict: 'email' });
+
+  if (sessionId) {
+    var abandono = null;
+    for (var k = 0; k < abandonos.length; k++) {
+      if (abandono[k] && abandonos[k].sessionId === sessionId) {
+        abandono = abandonos[k];
+        break;
+      }
+    }
+    if (abandono) {
+      abandono.status = 'finalizado';
+      abandono.data_finalizacao = new Date().toISOString();
+      abandono.pedido_id = pedido.id;
+    }
+  }
+
+  if (abandonos.length > 0 && abandonos.length % LIMITE_NOTIFICACAO === 0) {
+    var ultimosRegistros = abandonos.slice(-LIMITE_NOTIFICACAO);
+    enviarEmailNotificacao(ultimosRegistros).catch(function(err) { console.error(err); });
+  }
+
+  var msg = '*🛍️ NOVO PEDIDO JM STORE #' + pedido.id + '*\n\n';
+  msg = msg + '👤 *Cliente:* ' + (usuario ? usuario.nome : 'Não informado') + '\n';
+  msg = msg + '📧 *Email:* ' + (usuario ? usuario.email : 'Não informado') + '\n';
+  msg = msg + '📱 *Telefone:* ' + (usuario ? usuario.telefone : 'Não informado') + '\n';
+  msg = msg + '📍 *Região:* ' + (usuario ? usuario.regiao : 'Não informado') + '\n';
+  msg = msg + '📦 *Endereço:* ' + (endereco || (usuario ? usuario.regiao : 'Não informado')) + '\n\n';
+  msg = msg + '*📋 ITENS DO PEDIDO:*\n';
+  
+  for (var l = 0; l < itens.length; l++) {
+    var item3 = itens[l];
+    msg = msg + (l + 1) + '. ' + item3.nome + ' x' + item3.quantidade + ' = ' + (item3.preco * item3.quantidade).toLocaleString('pt-PT') + ' KZ\n';
+  }
+  
+  msg = msg + '\n*💰 TOTAL: ' + total.toLocaleString('pt-PT') + ' KZ*';
+  msg = msg + '\n💳 *Pagamento:* ' + (metodo_pagamento || 'WhatsApp');
+  msg = msg + '\n\n🔗 *Pedido #' + pedido.id + '*';
+  
+  var link = 'https://wa.me/' + NUMERO_WHATSAPP_JM + '?text=' + encodeURIComponent(msg);
+  
+  res.json({ 
+    link: link, 
+    pedido_id: pedido.id,
+    pedido: {
+      id: pedido.id,
+      total: total,
+      status: pedido.status,
+      data: pedido.data_pedido
+    }
+  });
+});
+
+// ============================================
+// RASTREIO DE ABANDONO
+// ============================================
 app.post('/api/checkout/registrar', async function(req, res) {
   var sessionId = req.body.sessionId;
   var usuario = req.body.usuario;
@@ -592,7 +828,296 @@ app.post('/api/checkout/step', async function(req, res) {
   res.json({ msg: "Step atualizado" });
 });
 
-// ===== ADMIN - ABANDONOS =====
+// ============================================
+// AVALIAÇÕES
+// ============================================
+app.post('/api/avaliacoes', verificarToken, async function(req, res) {
+  const { produto_id, nota, titulo, comentario } = req.body;
+  
+  if (!produto_id || !nota) {
+    return res.status(400).json({ error: 'Produto e nota são obrigatórios' });
+  }
+  
+  const { data, error } = await supabase
+    .from('avaliacoes')
+    .insert([{
+      produto_id,
+      usuario_id: req.usuario.id,
+      nota,
+      titulo,
+      comentario,
+      data_criacao: new Date().toISOString()
+    }])
+    .select();
+  
+  if (error) return res.status(500).json({ error: error });
+  res.json(data[0]);
+});
+
+app.get('/api/avaliacoes/:produto_id', async function(req, res) {
+  const { data, error } = await supabase
+    .from('avaliacoes')
+    .select('*, usuarios(nome)')
+    .eq('produto_id', req.params.produto_id)
+    .order('data_criacao', { ascending: false });
+  
+  if (error) return res.status(500).json({ error: error });
+  res.json(data);
+});
+
+// ============================================
+// WISHLIST
+// ============================================
+app.post('/api/wishlist', verificarToken, async function(req, res) {
+  const { produto_id } = req.body;
+  
+  const { data, error } = await supabase
+    .from('wishlist')
+    .insert([{
+      usuario_id: req.usuario.id,
+      produto_id
+    }])
+    .select();
+  
+  if (error) return res.status(500).json({ error: error });
+  res.json({ msg: 'Adicionado à wishlist', data: data[0] });
+});
+
+app.delete('/api/wishlist/:produto_id', verificarToken, async function(req, res) {
+  const { error } = await supabase
+    .from('wishlist')
+    .delete()
+    .eq('usuario_id', req.usuario.id)
+    .eq('produto_id', req.params.produto_id);
+  
+  if (error) return res.status(500).json({ error: error });
+  res.json({ msg: 'Removido da wishlist' });
+});
+
+app.get('/api/wishlist', verificarToken, async function(req, res) {
+  const { data, error } = await supabase
+    .from('wishlist')
+    .select('*, produtos(*)')
+    .eq('usuario_id', req.usuario.id);
+  
+  if (error) return res.status(500).json({ error: error });
+  res.json(data);
+});
+
+// ============================================
+// NEWSLETTER
+// ============================================
+app.post('/api/newsletter', async function(req, res) {
+  const { email, nome } = req.body;
+  
+  if (!email) return res.status(400).json({ error: 'Email é obrigatório' });
+  
+  const token = Math.random().toString(36).substr(2, 10);
+  
+  const { data, error } = await supabase
+    .from('newsletter')
+    .insert([{
+      email,
+      nome: nome || null,
+      token_confirmacao: token,
+      data_cadastro: new Date().toISOString()
+    }])
+    .select();
+  
+  if (error) {
+    if (error.code === '23505') {
+      return res.status(400).json({ error: 'Email já cadastrado' });
+    }
+    return res.status(500).json({ error: error });
+  }
+  
+  // Adicionar à lista de marketing
+  await supabase
+    .from('contatos_marketing')
+    .insert([{
+      email,
+      nome: nome || null,
+      origem: 'newsletter',
+      data_coleta: new Date().toISOString()
+    }]);
+  
+  res.json({ msg: 'Inscrito com sucesso!', data: data[0] });
+});
+
+// ============================================
+// FAQ
+// ============================================
+app.get('/api/faq', async function(req, res) {
+  const { data, error } = await supabase
+    .from('faq')
+    .select('*')
+    .eq('ativo', true)
+    .order('ordem');
+  
+  if (error) return res.status(500).json({ error: error });
+  res.json(data);
+});
+
+// ============================================
+// ADMIN - PRODUTOS
+// ============================================
+app.get('/api/admin/produtos', verificarToken, verificarAdmin, async function(req, res) {
+  const { data, error } = await supabase
+    .from('produtos')
+    .select('*')
+    .order('id');
+  if (error) return res.status(500).json({ error: error });
+  res.json(data);
+});
+
+app.post('/api/admin/produtos', verificarToken, verificarAdmin, async function(req, res) {
+  const { data, error } = await supabase
+    .from('produtos')
+    .insert([{ 
+      nome: req.body.nome,
+      preco: req.body.preco,
+      categoria: req.body.categoria,
+      imagem: req.body.imagem,
+      status: req.body.status || 'novo',
+      frete_luanda: req.body.frete_luanda || 0,
+      frete_outras: req.body.frete_outras || 5000,
+      estoque: req.body.estoque || 'disponivel',
+      tempo_entrega: req.body.tempo_entrega || '1-2 dias úteis',
+      especificacoes: req.body.especificacoes || {},
+      visivel: true 
+    }])
+    .select();
+  if (error) return res.status(500).json({ error: error });
+  res.json(data[0]);
+});
+
+app.put('/api/admin/produtos/:id', verificarToken, verificarAdmin, async function(req, res) {
+  const { data, error } = await supabase
+    .from('produtos')
+    .update({ 
+      nome: req.body.nome,
+      preco: req.body.preco,
+      categoria: req.body.categoria,
+      imagem: req.body.imagem,
+      status: req.body.status,
+      frete_luanda: req.body.frete_luanda,
+      frete_outras: req.body.frete_outras,
+      estoque: req.body.estoque,
+      tempo_entrega: req.body.tempo_entrega,
+      especificacoes: req.body.especificacoes || {}
+    })
+    .eq('id', req.params.id)
+    .select();
+  if (error) return res.status(500).json({ error: error });
+  res.json(data[0]);
+});
+
+app.patch('/api/admin/produtos/:id/visibilidade', verificarToken, verificarAdmin, async function(req, res) {
+  var visivel = req.body.visivel;
+  if (typeof visivel !== 'boolean') {
+    return res.status(400).json({ error: 'visivel deve ser boolean' });
+  }
+  
+  const { data, error } = await supabase
+    .from('produtos')
+    .update({ visivel: visivel })
+    .eq('id', req.params.id)
+    .select();
+  if (error) return res.status(500).json({ error: error });
+  res.json(data[0]);
+});
+
+app.delete('/api/admin/produtos/:id', verificarToken, verificarAdmin, async function(req, res) {
+  const { error } = await supabase
+    .from('produtos')
+    .delete()
+    .eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error });
+  res.json({ msg: "Produto deletado" });
+});
+
+// ============================================
+// ADMIN - IMAGENS
+// ============================================
+app.post('/api/admin/imagens', verificarToken, verificarAdmin, async function(req, res) {
+  const { produto_id, urls } = req.body;
+  
+  if (!produto_id || !urls || !Array.isArray(urls)) {
+    return res.status(400).json({ error: 'Dados inválidos' });
+  }
+  
+  // Remover imagens antigas
+  await supabase
+    .from('imagens_produtos')
+    .delete()
+    .eq('produto_id', produto_id);
+  
+  // Inserir novas imagens
+  var imagens = [];
+  for (var i = 0; i < urls.length; i++) {
+    imagens.push({
+      produto_id: produto_id,
+      url: urls[i],
+      ordem: i
+    });
+  }
+  
+  const { data, error } = await supabase
+    .from('imagens_produtos')
+    .insert(imagens)
+    .select();
+  
+  if (error) return res.status(500).json({ error: error });
+  res.json(data);
+});
+
+// ============================================
+// ADMIN - UPLOAD
+// ============================================
+app.post('/api/admin/upload', verificarToken, verificarAdmin, upload.single('imagem'), async function(req, res) {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Nenhuma imagem' });
+    }
+
+    var buffer = await sharp(req.file.buffer)
+      .resize(800, 800, { fit: 'cover', withoutEnlargement: true })
+      .jpeg({ quality: 80 })
+      .toBuffer();
+
+    var id = ++contadorImagens;
+    var nome = 'img_' + id + '_' + Date.now() + '.jpg';
+    
+    cacheImagens.set(id, {
+      buffer: buffer,
+      mimeType: 'image/jpeg',
+      nome: nome,
+      tamanho: buffer.length,
+      criado_em: new Date().toISOString()
+    });
+
+    var url = req.protocol + '://' + req.get('host') + '/api/imagem/' + id;
+    res.json({ success: true, url: url, id: id });
+  } catch (error) {
+    console.error('Erro upload:', error);
+    res.status(500).json({ error: 'Erro ao fazer upload' });
+  }
+});
+
+app.get('/api/imagem/:id', function(req, res) {
+  var id = parseInt(req.params.id);
+  var imagem = cacheImagens.get(id);
+  if (!imagem) {
+    return res.status(404).json({ error: 'Imagem não encontrada' });
+  }
+  res.set('Content-Type', imagem.mimeType);
+  res.set('Cache-Control', 'public, max-age=31536000');
+  res.send(imagem.buffer);
+});
+
+// ============================================
+// ADMIN - ABANDONOS
+// ============================================
 app.get('/api/admin/abandonos', verificarToken, verificarAdmin, function(req, res) {
   var abandonados = [];
   var finalizados = [];
@@ -716,226 +1241,152 @@ app.post('/api/admin/notificar-whatsapp', verificarToken, verificarAdmin, functi
   });
 });
 
-// ===== ADMIN - PRODUTOS =====
-app.get('/api/admin/produtos', verificarToken, verificarAdmin, async function(req, res) {
+// ============================================
+// ADMIN - RASTREIO
+// ============================================
+app.put('/api/admin/pedidos/:id/rastreio', verificarToken, verificarAdmin, async function(req, res) {
+  const { codigo_rastreio, transportadora, status, observacao } = req.body;
+  
+  const { data: pedido, error: errBusca } = await supabase
+    .from('pedidos')
+    .select('historico_rastreio')
+    .eq('id', req.params.id)
+    .single();
+  
+  if (errBusca) return res.status(404).json({ error: 'Pedido não encontrado' });
+  
+  const historico = pedido.historico_rastreio || [];
+  historico.push({
+    status: status || 'Atualizado',
+    observacao: observacao || '',
+    data: new Date().toISOString()
+  });
+  
   const { data, error } = await supabase
-    .from('produtos')
+    .from('pedidos')
+    .update({
+      codigo_rastreio,
+      transportadora: transportadora || 'JM Express',
+      status: status || pedido.status,
+      status_atualizado_em: new Date().toISOString(),
+      historico_rastreio: historico
+    })
+    .eq('id', req.params.id)
+    .select();
+  
+  if (error) return res.status(500).json({ error: error });
+  res.json(data[0]);
+});
+
+// ============================================
+// ADMIN - MARKETING
+// ============================================
+app.get('/api/admin/contatos', verificarToken, verificarAdmin, async function(req, res) {
+  const { data, error } = await supabase
+    .from('contatos_marketing')
     .select('*')
-    .order('id');
+    .order('data_coleta', { ascending: false });
+  
   if (error) return res.status(500).json({ error: error });
   res.json(data);
 });
 
-app.post('/api/admin/produtos', verificarToken, verificarAdmin, async function(req, res) {
+app.get('/api/admin/contatos/exportar', verificarToken, verificarAdmin, async function(req, res) {
   const { data, error } = await supabase
-    .from('produtos')
-    .insert([{ 
-      nome: req.body.nome, 
-      preco: req.body.preco, 
-      categoria: req.body.categoria, 
-      imagem: req.body.imagem, 
-      visivel: true 
-    }])
-    .select();
-  if (error) return res.status(500).json({ error: error });
-  res.json(data[0]);
-});
-
-app.put('/api/admin/produtos/:id', verificarToken, verificarAdmin, async function(req, res) {
-  const { data, error } = await supabase
-    .from('produtos')
-    .update({ 
-      nome: req.body.nome, 
-      preco: req.body.preco, 
-      categoria: req.body.categoria, 
-      imagem: req.body.imagem 
-    })
-    .eq('id', req.params.id)
-    .select();
-  if (error) return res.status(500).json({ error: error });
-  res.json(data[0]);
-});
-
-app.patch('/api/admin/produtos/:id/visibilidade', verificarToken, verificarAdmin, async function(req, res) {
-  var visivel = req.body.visivel;
-  if (typeof visivel !== 'boolean') {
-    return res.status(400).json({ error: 'visivel deve ser boolean' });
-  }
+    .from('contatos_marketing')
+    .select('email, telefone, nome, regiao, origem, data_coleta, total_compras, total_gasto');
   
-  const { data, error } = await supabase
-    .from('produtos')
-    .update({ visivel: visivel })
-    .eq('id', req.params.id)
-    .select();
   if (error) return res.status(500).json({ error: error });
-  res.json(data[0]);
-});
-
-app.delete('/api/admin/produtos/:id', verificarToken, verificarAdmin, async function(req, res) {
-  const { error } = await supabase
-    .from('produtos')
-    .delete()
-    .eq('id', req.params.id);
-  if (error) return res.status(500).json({ error: error });
-  res.json({ msg: "Produto deletado" });
-});
-
-// ===== UPLOAD DE IMAGENS =====
-app.post('/api/admin/upload', verificarToken, verificarAdmin, upload.single('imagem'), async function(req, res) {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'Nenhuma imagem' });
-    }
-
-    var buffer = await sharp(req.file.buffer)
-      .resize(800, 800, { fit: 'cover', withoutEnlargement: true })
-      .jpeg({ quality: 80 })
-      .toBuffer();
-
-    var id = ++contadorImagens;
-    var nome = 'img_' + id + '_' + Date.now() + '.jpg';
-    
-    cacheImagens.set(id, {
-      buffer: buffer,
-      mimeType: 'image/jpeg',
-      nome: nome,
-      tamanho: buffer.length,
-      criado_em: new Date().toISOString()
-    });
-
-    var url = req.protocol + '://' + req.get('host') + '/api/imagem/' + id;
-    res.json({ success: true, url: url, id: id });
-  } catch (error) {
-    console.error('Erro upload:', error);
-    res.status(500).json({ error: 'Erro ao fazer upload' });
-  }
-});
-
-app.get('/api/imagem/:id', function(req, res) {
-  var id = parseInt(req.params.id);
-  var imagem = cacheImagens.get(id);
-  if (!imagem) {
-    return res.status(404).json({ error: 'Imagem não encontrada' });
-  }
-  res.set('Content-Type', imagem.mimeType);
-  res.set('Cache-Control', 'public, max-age=31536000');
-  res.send(imagem.buffer);
-});
-
-// ===== CHECKOUT =====
-app.post('/api/checkout', verificarToken, async function(req, res) {
-  var usuario_id = req.usuario.id;
-  var itens = req.body.itens;
-  var endereco = req.body.endereco;
-  var metodo_pagamento = req.body.metodo_pagamento;
-  var sessionId = req.body.sessionId;
   
-  if (!itens || itens.length === 0) {
-    return res.status(400).json({ error: "Carrinho vazio" });
-  }
-
-  const { data: usuario } = await supabase
-    .from('usuarios')
-    .select('nome, telefone, regiao, email')
-    .eq('id', usuario_id)
-    .single();
-
-  var total = 0;
-  for (var i = 0; i < itens.length; i++) {
-    total = total + itens[i].preco * itens[i].quantidade;
-  }
+  const headers = ['Email', 'Telefone', 'Nome', 'Região', 'Origem', 'Data Coleta', 'Compras', 'Gasto Total'];
+  let csv = headers.join(',') + '\n';
   
-  const { data: pedido, error: erroPedido } = await supabase
-    .from('pedidos')
-    .insert([{ 
-      usuario_id: usuario_id, 
-      total: total, 
-      status: 'Aguardando WhatsApp',
-      endereco: endereco || (usuario ? usuario.regiao : 'Não informado'),
-      metodo_pagamento: metodo_pagamento || 'WhatsApp',
-      data_pedido: new Date().toISOString()
+  data.forEach(function(c) {
+    const row = [
+      c.email || '',
+      c.telefone || '',
+      c.nome || '',
+      c.regiao || '',
+      c.origem || '',
+      new Date(c.data_coleta).toLocaleDateString('pt-PT'),
+      c.total_compras || 0,
+      (c.total_gasto || 0).toLocaleString('pt-PT') + ' KZ'
+    ];
+    csv += row.join(',') + '\n';
+  });
+  
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename=contatos_marketing.csv');
+  res.send(csv);
+});
+
+app.post('/api/admin/campanhas', verificarToken, verificarAdmin, async function(req, res) {
+  const { lista_id, titulo, mensagem, tipo, enviar_agora } = req.body;
+  
+  const { data: campanha, error: errCamp } = await supabase
+    .from('campanhas_marketing')
+    .insert([{
+      lista_id,
+      titulo,
+      mensagem,
+      tipo: tipo || 'email',
+      data_criacao: new Date().toISOString(),
+      data_envio: enviar_agora ? new Date().toISOString() : null
     }])
     .select()
     .single();
   
-  if (erroPedido) {
-    console.error('Erro criar pedido:', erroPedido);
-    return res.status(500).json({ error: "Erro ao criar pedido" });
-  }
-
-  var itensPedido = [];
-  for (var j = 0; j < itens.length; j++) {
-    itensPedido.push({
-      pedido_id: pedido.id,
-      produto_id: itens[j].id,
-      quantidade: itens[j].quantidade,
-      preco_unitario: itens[j].preco
-    });
-  }
+  if (errCamp) return res.status(500).json({ error: errCamp });
   
-  await supabase
-    .from('itens_pedido')
-    .insert(itensPedido);
-
-  await supabase
-    .from('carrinho')
-    .delete()
-    .eq('usuario_id', usuario_id);
-
-  if (sessionId) {
-    var abandono = null;
-    for (var k = 0; k < abandonos.length; k++) {
-      if (abandonos[k] && abandonos[k].sessionId === sessionId) {
-        abandono = abandonos[k];
-        break;
+  if (enviar_agora) {
+    const { data: contatos } = await supabase
+      .from('contatos_marketing')
+      .select('*')
+      .eq('lista_id', lista_id)
+      .eq('ativo', true);
+    
+    let enviados = 0;
+    if (contatos) {
+      for (var i = 0; i < contatos.length; i++) {
+        var contato = contatos[i];
+        if (tipo === 'email' && contato.email && transporter) {
+          try {
+            await transporter.sendMail({
+              from: process.env.EMAIL_USER,
+              to: contato.email,
+              subject: titulo,
+              html: mensagem.replace(/\n/g, '<br>')
+            });
+            enviados++;
+          } catch (error) {
+            console.error('Erro ao enviar para:', contato.email, error);
+          }
+        }
       }
     }
-    if (abandono) {
-      abandono.status = 'finalizado';
-      abandono.data_finalizacao = new Date().toISOString();
-      abandono.pedido_id = pedido.id;
-    }
-  }
-
-  // VERIFICA SE DEVE ENVIAR EMAIL
-  if (abandonos.length > 0 && abandonos.length % LIMITE_NOTIFICACAO === 0) {
-    var ultimosRegistros = abandonos.slice(-LIMITE_NOTIFICACAO);
-    enviarEmailNotificacao(ultimosRegistros).catch(function(err) { console.error(err); });
-  }
-
-  // MENSAGEM WHATSAPP
-  var msg = '*🛍️ NOVO PEDIDO JM STORE #' + pedido.id + '*\n\n';
-  msg = msg + '👤 *Cliente:* ' + (usuario ? usuario.nome : 'Não informado') + '\n';
-  msg = msg + '📧 *Email:* ' + (usuario ? usuario.email : 'Não informado') + '\n';
-  msg = msg + '📱 *Telefone:* ' + (usuario ? usuario.telefone : 'Não informado') + '\n';
-  msg = msg + '📍 *Região:* ' + (usuario ? usuario.regiao : 'Não informado') + '\n';
-  msg = msg + '📦 *Endereço:* ' + (endereco || (usuario ? usuario.regiao : 'Não informado')) + '\n\n';
-  msg = msg + '*📋 ITENS DO PEDIDO:*\n';
-  
-  for (var l = 0; l < itens.length; l++) {
-    var item3 = itens[l];
-    msg = msg + (l + 1) + '. ' + item3.nome + ' x' + item3.quantidade + ' = ' + (item3.preco * item3.quantidade).toLocaleString('pt-PT') + ' KZ\n';
+    
+    await supabase
+      .from('campanhas_marketing')
+      .update({ enviados: enviados })
+      .eq('id', campanha.id);
   }
   
-  msg = msg + '\n*💰 TOTAL: ' + total.toLocaleString('pt-PT') + ' KZ*';
-  msg = msg + '\n💳 *Pagamento:* ' + (metodo_pagamento || 'WhatsApp');
-  msg = msg + '\n\n🔗 *Pedido #' + pedido.id + '*';
-  
-  var link = 'https://wa.me/' + NUMERO_WHATSAPP_JM + '?text=' + encodeURIComponent(msg);
-  
-  res.json({ 
-    link: link, 
-    pedido_id: pedido.id,
-    pedido: {
-      id: pedido.id,
-      total: total,
-      status: pedido.status,
-      data: pedido.data_pedido
-    }
-  });
+  res.json({ msg: 'Campanha criada!', campanha });
 });
 
-// ===== DASHBOARD ADMIN =====
+app.get('/api/admin/campanhas', verificarToken, verificarAdmin, async function(req, res) {
+  const { data, error } = await supabase
+    .from('campanhas_marketing')
+    .select('*, listas_marketing(nome)')
+    .order('data_criacao', { ascending: false });
+  
+  if (error) return res.status(500).json({ error: error });
+  res.json(data);
+});
+
+// ============================================
+// ADMIN - DASHBOARD
+// ============================================
 app.get('/api/admin/dashboard', verificarToken, verificarAdmin, async function(req, res) {
   try {
     const { count: totalProdutos } = await supabase
@@ -982,7 +1433,9 @@ app.get('/api/admin/dashboard', verificarToken, verificarAdmin, async function(r
   }
 });
 
-// ===== INICIAR SERVIDOR =====
+// ============================================
+// INICIAR SERVIDOR
+// ============================================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, function() {
   console.log('🚀 JM Server rodando na porta ' + PORT);
