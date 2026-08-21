@@ -18,7 +18,6 @@ const app = express();
 const allowedOrigins = [
   'https://mikehely.github.io',
   'https://jm-store.vercel.app',
-  'https://jm-store.vercel.app',
   'http://localhost:3000',
   'http://localhost:5173',
   'https://jm-server.onrender.com'
@@ -26,13 +25,12 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: function(origin, callback) {
-    // Permitir requisições sem origin (como mobile apps)
     if (!origin) return callback(null, true);
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
       console.log('❌ CORS bloqueou:', origin);
-      callback(null, true); // 🔥 PERMITE TUDO PARA TESTE
+      callback(null, true);
     }
   },
   credentials: true,
@@ -40,9 +38,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With']
 }));
 
-// Responder a todas as requisições OPTIONS (preflight)
 app.options('*', cors());
-
 app.use(express.json({ limit: '50mb' }));
 
 // ============================================
@@ -296,6 +292,24 @@ app.get('/api/usuario/perfil', verificarToken, async function(req, res) {
   }
 });
 
+app.put('/api/usuario/perfil', verificarToken, async function(req, res) {
+  try {
+    const { nome, telefone, regiao } = req.body;
+    
+    const { data, error } = await supabase
+      .from('usuarios')
+      .update({ nome, telefone, regiao })
+      .eq('id', req.usuario.id)
+      .select();
+    
+    if (error) throw error;
+    res.json(data[0]);
+  } catch (error) {
+    console.error('❌ Erro atualizar perfil:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ============================================
 // CARRINHO
 // ============================================
@@ -463,6 +477,148 @@ app.get('/api/avaliacoes/:produto_id', async function(req, res) {
 });
 
 // ============================================
+// CHECKOUT E ABANDONOS
+// ============================================
+const abandonos = [];
+
+app.post('/api/checkout/registrar', function(req, res) {
+  const { sessionId, usuario, itens } = req.body;
+  
+  if (!sessionId) {
+    return res.status(400).json({ error: "sessionId é obrigatório" });
+  }
+  
+  const total = (itens || []).reduce((s, i) => s + (i.preco || 0) * (i.quantidade || 1), 0);
+  
+  const existente = abandonos.find(a => a.sessionId === sessionId);
+  
+  const registro = {
+    sessionId,
+    usuario: usuario || { nome: 'Visitante', email: 'Não informado', telefone: 'Não informado' },
+    itens: itens || [],
+    total,
+    step: 'checkout_aberto',
+    timestamp: new Date().toISOString(),
+    status: 'abandonado',
+    tentativas: 0
+  };
+  
+  if (existente) {
+    Object.assign(existente, registro);
+  } else {
+    abandonos.push(registro);
+  }
+  
+  res.json({ msg: "Checkout registrado" });
+});
+
+app.post('/api/checkout/step', function(req, res) {
+  const { sessionId, step } = req.body;
+  
+  const registro = abandonos.find(a => a.sessionId === sessionId);
+  if (registro) {
+    registro.step = step;
+    if (step === 'finalizado') {
+      registro.status = 'finalizado';
+      registro.data_finalizacao = new Date().toISOString();
+    }
+  }
+  
+  res.json({ msg: "Step atualizado" });
+});
+
+app.post('/api/checkout', verificarToken, async function(req, res) {
+  try {
+    const usuario_id = req.usuario.id;
+    const { itens, endereco, metodo_pagamento, sessionId } = req.body;
+    
+    if (!itens || itens.length === 0) {
+      return res.status(400).json({ error: "Carrinho vazio" });
+    }
+    
+    const { data: usuario } = await supabase
+      .from('usuarios')
+      .select('nome, telefone, regiao, email')
+      .eq('id', usuario_id)
+      .single();
+    
+    const total = itens.reduce((s, i) => s + i.preco * i.quantidade, 0);
+    
+    const { data: pedido, error: errPedido } = await supabase
+      .from('pedidos')
+      .insert([{ 
+        usuario_id, 
+        total, 
+        status: 'Aguardando WhatsApp',
+        endereco: endereco || usuario?.regiao || 'Não informado',
+        metodo_pagamento: metodo_pagamento || 'WhatsApp',
+        data_pedido: new Date().toISOString()
+      }])
+      .select()
+      .single();
+    
+    if (errPedido) throw errPedido;
+    
+    const itensPedido = itens.map(i => ({
+      pedido_id: pedido.id,
+      produto_id: i.id,
+      quantidade: i.quantidade,
+      preco_unitario: i.preco
+    }));
+    
+    await supabase
+      .from('itens_pedido')
+      .insert(itensPedido);
+    
+    await supabase
+      .from('carrinho')
+      .delete()
+      .eq('usuario_id', usuario_id);
+    
+    if (sessionId) {
+      const abandono = abandonos.find(a => a.sessionId === sessionId);
+      if (abandono) {
+        abandono.status = 'finalizado';
+        abandono.data_finalizacao = new Date().toISOString();
+        abandono.pedido_id = pedido.id;
+      }
+    }
+    
+    let msg = `*🛍️ NOVO PEDIDO JM STORE #${pedido.id}*\n\n`;
+    msg += `👤 *Cliente:* ${usuario?.nome || 'Não informado'}\n`;
+    msg += `📧 *Email:* ${usuario?.email || 'Não informado'}\n`;
+    msg += `📱 *Telefone:* ${usuario?.telefone || 'Não informado'}\n`;
+    msg += `📍 *Região:* ${usuario?.regiao || 'Não informado'}\n`;
+    msg += `📦 *Endereço:* ${endereco || usuario?.regiao || 'Não informado'}\n\n`;
+    msg += `*📋 ITENS DO PEDIDO:*\n`;
+    
+    itens.forEach((i, idx) => {
+      msg += `${idx + 1}. ${i.nome} x${i.quantidade} = ${(i.preco * i.quantidade).toLocaleString('pt-PT')} KZ\n`;
+    });
+    
+    msg += `\n*💰 TOTAL: ${total.toLocaleString('pt-PT')} KZ*`;
+    msg += `\n💳 *Pagamento:* ${metodo_pagamento || 'WhatsApp'}`;
+    msg += `\n\n🔗 *Pedido #${pedido.id}*`;
+    
+    const link = `https://wa.me/${NUMERO_WHATSAPP_JM}?text=${encodeURIComponent(msg)}`;
+    
+    res.json({ 
+      link, 
+      pedido_id: pedido.id,
+      pedido: {
+        id: pedido.id,
+        total,
+        status: pedido.status,
+        data: pedido.data_pedido
+      }
+    });
+  } catch (error) {
+    console.error('❌ Erro checkout:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
 // ADMIN - PRODUTOS
 // ============================================
 function verificarAdmin(req, res, next) {
@@ -579,6 +735,125 @@ app.delete('/api/admin/produtos/:id', verificarToken, verificarAdmin, async func
 });
 
 // ============================================
+// ADMIN - IMAGENS
+// ============================================
+app.post('/api/admin/imagens', verificarToken, verificarAdmin, async function(req, res) {
+  try {
+    const { produto_id, urls } = req.body;
+    
+    if (!produto_id || !urls || !Array.isArray(urls)) {
+      return res.status(400).json({ error: 'Dados inválidos' });
+    }
+    
+    await supabase
+      .from('imagens_produtos')
+      .delete()
+      .eq('produto_id', produto_id);
+    
+    const imagens = urls.map((url, index) => ({
+      produto_id,
+      url,
+      ordem: index
+    }));
+    
+    const { data, error } = await supabase
+      .from('imagens_produtos')
+      .insert(imagens)
+      .select();
+    
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    console.error('❌ Erro salvar imagens:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// ADMIN - UPLOAD
+// ============================================
+const upload = multer({ storage: multer.memoryStorage() });
+
+app.post('/api/admin/upload', verificarToken, verificarAdmin, upload.single('imagem'), function(req, res) {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Nenhuma imagem enviada' });
+    }
+    
+    const url = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+    res.json({ success: true, url });
+  } catch (error) {
+    console.error('❌ Erro upload:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// ADMIN - ABANDONOS
+// ============================================
+app.get('/api/admin/abandonos', verificarToken, verificarAdmin, function(req, res) {
+  res.json({
+    abandonos: abandonos.filter(a => a.status === 'abandonado'),
+    finalizados: abandonos.filter(a => a.status === 'finalizado'),
+    total: abandonos.length,
+    total_abandonos: abandonos.filter(a => a.status === 'abandonado').length,
+    total_finalizados: abandonos.filter(a => a.status === 'finalizado').length
+  });
+});
+
+app.delete('/api/admin/abandonos/:sessionId', verificarToken, verificarAdmin, function(req, res) {
+  const index = abandonos.findIndex(a => a.sessionId === req.params.sessionId);
+  if (index === -1) {
+    return res.status(404).json({ error: "Registro não encontrado" });
+  }
+  abandonos.splice(index, 1);
+  res.json({ msg: "Registro excluído com sucesso" });
+});
+
+app.delete('/api/admin/abandonos/limpar', verificarToken, verificarAdmin, function(req, res) {
+  abandonos.length = 0;
+  res.json({ msg: "Registros limpos com sucesso" });
+});
+
+app.post('/api/admin/notificar-whatsapp', verificarToken, verificarAdmin, function(req, res) {
+  const { sessionId } = req.body;
+  
+  const abandono = abandonos.find(a => a.sessionId === sessionId);
+  if (!abandono) {
+    return res.status(404).json({ error: "Abandono não encontrado" });
+  }
+  
+  if (!abandono.usuario?.telefone || abandono.usuario.telefone === 'Não informado') {
+    return res.status(400).json({ error: "Usuário não tem telefone cadastrado" });
+  }
+  
+  let mensagem = `🛍️ *JM Store - Carrinho Abandonado*\n\n` +
+    `Olá ${abandono.usuario.nome || 'cliente'}! 👋\n\n` +
+    `Vimos que você deixou alguns produtos no carrinho. Quer finalizar sua compra?\n\n` +
+    `📦 *Itens:*\n`;
+  
+  abandono.itens.forEach(item => {
+    mensagem += `- ${item.nome} x${item.quantidade}: ${(item.preco * item.quantidade).toLocaleString('pt-PT')} KZ\n`;
+  });
+  
+  mensagem += `\n💰 *Total: ${abandono.total.toLocaleString('pt-PT')} KZ*\n\n`;
+  mensagem += `Acesse: ${process.env.STORE_URL || 'https://jm-store.vercel.app'}\n\n`;
+  mensagem += `*Responda esta mensagem para finalizar seu pedido!* 🚀`;
+  
+  const link = `https://wa.me/${abandono.usuario.telefone}?text=${encodeURIComponent(mensagem)}`;
+  
+  abandono.tentativas++;
+  abandono.ultimo_contato = new Date().toISOString();
+  
+  res.json({ 
+    success: true, 
+    link,
+    mensagem,
+    telefone: abandono.usuario.telefone
+  });
+});
+
+// ============================================
 // ADMIN - DASHBOARD
 // ============================================
 app.get('/api/admin/dashboard', verificarToken, verificarAdmin, async function(req, res) {
@@ -609,190 +884,7 @@ app.get('/api/admin/dashboard', verificarToken, verificarAdmin, async function(r
 });
 
 // ============================================
-// ADMIN - ABANDONOS
-// ============================================
-const abandonos = [];
-
-app.get('/api/admin/abandonos', verificarToken, verificarAdmin, function(req, res) {
-  res.json({
-    abandonos: abandonos.filter(a => a.status === 'abandonado'),
-    finalizados: abandonos.filter(a => a.status === 'finalizado'),
-    total: abandonos.length,
-    total_abandonos: abandonos.filter(a => a.status === 'abandonado').length,
-    total_finalizados: abandonos.filter(a => a.status === 'finalizado').length
-  });
-});
-
-app.delete('/api/admin/abandonos/:sessionId', verificarToken, verificarAdmin, function(req, res) {
-  const index = abandonos.findIndex(a => a.sessionId === req.params.sessionId);
-  if (index === -1) {
-    return res.status(404).json({ error: "Registro não encontrado" });
-  }
-  abandonos.splice(index, 1);
-  res.json({ msg: "Registro excluído com sucesso" });
-});
-
-app.delete('/api/admin/abandonos/limpar', verificarToken, verificarAdmin, function(req, res) {
-  abandonos.length = 0;
-  res.json({ msg: "Registros limpos com sucesso" });
-});
-
-app.post('/api/checkout/registrar', function(req, res) {
-  const { sessionId, usuario, itens } = req.body;
-  
-  if (!sessionId) {
-    return res.status(400).json({ error: "sessionId é obrigatório" });
-  }
-  
-  const total = (itens || []).reduce((s, i) => s + (i.preco || 0) * (i.quantidade || 1), 0);
-  
-  const existente = abandonos.find(a => a.sessionId === sessionId);
-  
-  const registro = {
-    sessionId,
-    usuario: usuario || { nome: 'Visitante', email: 'Não informado', telefone: 'Não informado' },
-    itens: itens || [],
-    total,
-    step: 'checkout_aberto',
-    timestamp: new Date().toISOString(),
-    status: 'abandonado',
-    tentativas: 0
-  };
-  
-  if (existente) {
-    Object.assign(existente, registro);
-  } else {
-    abandonos.push(registro);
-  }
-  
-  res.json({ msg: "Checkout registrado" });
-});
-
-app.post('/api/checkout/step', function(req, res) {
-  const { sessionId, step } = req.body;
-  
-  const registro = abandonos.find(a => a.sessionId === sessionId);
-  if (registro) {
-    registro.step = step;
-    if (step === 'finalizado') {
-      registro.status = 'finalizado';
-      registro.data_finalizacao = new Date().toISOString();
-    }
-  }
-  
-  res.json({ msg: "Step atualizado" });
-});
-
-// ============================================
-// CHECKOUT
-// ============================================
-app.post('/api/checkout', verificarToken, async function(req, res) {
-  try {
-    const usuario_id = req.usuario.id;
-    const { itens, endereco, metodo_pagamento, sessionId } = req.body;
-    
-    if (!itens || itens.length === 0) {
-      return res.status(400).json({ error: "Carrinho vazio" });
-    }
-    
-    const { data: usuario } = await supabase
-      .from('usuarios')
-      .select('nome, telefone, regiao, email')
-      .eq('id', usuario_id)
-      .single();
-    
-    const total = itens.reduce((s, i) => s + i.preco * i.quantidade, 0);
-    
-    const { data: pedido, error: errPedido } = await supabase
-      .from('pedidos')
-      .insert([{ 
-        usuario_id, 
-        total, 
-        status: 'Aguardando WhatsApp',
-        endereco: endereco || usuario?.regiao || 'Não informado',
-        metodo_pagamento: metodo_pagamento || 'WhatsApp',
-        data_pedido: new Date().toISOString()
-      }])
-      .select()
-      .single();
-    
-    if (errPedido) throw errPedido;
-    
-    const itensPedido = itens.map(i => ({
-      pedido_id: pedido.id,
-      produto_id: i.id,
-      quantidade: i.quantidade,
-      preco_unitario: i.preco
-    }));
-    
-    await supabase
-      .from('itens_pedido')
-      .insert(itensPedido);
-    
-    await supabase
-      .from('carrinho')
-      .delete()
-      .eq('usuario_id', usuario_id);
-    
-    if (sessionId) {
-      const abandono = abandonos.find(a => a.sessionId === sessionId);
-      if (abandono) {
-        abandono.status = 'finalizado';
-        abandono.data_finalizacao = new Date().toISOString();
-        abandono.pedido_id = pedido.id;
-      }
-    }
-    
-    let msg = `*🛍️ NOVO PEDIDO JM STORE #${pedido.id}*\n\n`;
-    msg += `👤 *Cliente:* ${usuario?.nome || 'Não informado'}\n`;
-    msg += `📧 *Email:* ${usuario?.email || 'Não informado'}\n`;
-    msg += `📱 *Telefone:* ${usuario?.telefone || 'Não informado'}\n`;
-    msg += `📍 *Região:* ${usuario?.regiao || 'Não informado'}\n`;
-    msg += `📦 *Endereço:* ${endereco || usuario?.regiao || 'Não informado'}\n\n`;
-    msg += `*📋 ITENS DO PEDIDO:*\n`;
-    
-    itens.forEach((i, idx) => {
-      msg += `${idx + 1}. ${i.nome} x${i.quantidade} = ${(i.preco * i.quantidade).toLocaleString('pt-PT')} KZ\n`;
-    });
-    
-    msg += `\n*💰 TOTAL: ${total.toLocaleString('pt-PT')} KZ*`;
-    msg += `\n💳 *Pagamento:* ${metodo_pagamento || 'WhatsApp'}`;
-    msg += `\n\n🔗 *Pedido #${pedido.id}*`;
-    
-    const link = `https://wa.me/${NUMERO_WHATSAPP_JM}?text=${encodeURIComponent(msg)}`;
-    
-    res.json({ 
-      link, 
-      pedido_id: pedido.id,
-      pedido: {
-        id: pedido.id,
-        total,
-        status: pedido.status,
-        data: pedido.data_pedido
-      }
-    });
-  } catch (error) {
-    console.error('❌ Erro checkout:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ============================================
-// ADMIN - UPLOAD
-// ============================================
-const upload = multer({ storage: multer.memoryStorage() });
-
-app.post('/api/admin/upload', verificarToken, verificarAdmin, upload.single('imagem'), function(req, res) {
-  if (!req.file) {
-    return res.status(400).json({ error: 'Nenhuma imagem enviada' });
-  }
-  
-  const url = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
-  res.json({ success: true, url });
-});
-
-// ============================================
-// VISITANTES
+// ADMIN - VISITANTES
 // ============================================
 app.post('/api/visitantes/registrar', function(req, res) {
   res.json({ msg: 'Visita registrada' });
@@ -805,6 +897,23 @@ app.get('/api/admin/visitantes', verificarToken, verificarAdmin, function(req, r
     unicos: 0,
     ultimas: []
   });
+});
+
+// ============================================
+// ADMIN - MARKETING
+// ============================================
+app.get('/api/admin/contatos', verificarToken, verificarAdmin, function(req, res) {
+  res.json([]);
+});
+
+app.get('/api/admin/contatos/exportar', verificarToken, verificarAdmin, function(req, res) {
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename=contatos.csv');
+  res.send('Email,Telefone,Nome,Regiao\n');
+});
+
+app.post('/api/admin/campanhas', verificarToken, verificarAdmin, function(req, res) {
+  res.json({ msg: 'Campanha criada' });
 });
 
 // ============================================
@@ -871,23 +980,6 @@ app.get('/api/pedidos/:id/rastreio', verificarToken, async function(req, res) {
 
 app.put('/api/admin/pedidos/:id/rastreio', verificarToken, verificarAdmin, function(req, res) {
   res.json({ msg: 'Rastreio atualizado' });
-});
-
-// ============================================
-// CONTATOS MARKETING
-// ============================================
-app.get('/api/admin/contatos', verificarToken, verificarAdmin, function(req, res) {
-  res.json([]);
-});
-
-app.get('/api/admin/contatos/exportar', verificarToken, verificarAdmin, function(req, res) {
-  res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', 'attachment; filename=contatos.csv');
-  res.send('Email,Telefone,Nome,Regiao\n');
-});
-
-app.post('/api/admin/campanhas', verificarToken, verificarAdmin, function(req, res) {
-  res.json({ msg: 'Campanha criada' });
 });
 
 // ============================================
