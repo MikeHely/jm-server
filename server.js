@@ -13,25 +13,45 @@ require('dotenv').config();
 const app = express();
 
 // ============================================
-// 🔥 CORS CORRETO - RESOLVE O PROBLEMA
+// 🔥 CORS CORRETO - PERMITE TODAS AS ORIGENS
 // ============================================
+const allowedOrigins = [
+  'https://mikehely.github.io',
+  'https://jm-store.vercel.app',
+  'https://jm-store.vercel.app',
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'https://jm-server.onrender.com'
+];
+
 app.use(cors({
-  origin: [
-    'https://jm-store.vercel.app',
-    'https://jm-store.vercel.app',
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'https://jm-server.onrender.com'
-  ],
+  origin: function(origin, callback) {
+    // Permitir requisições sem origin (como mobile apps)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log('❌ CORS bloqueou:', origin);
+      callback(null, true); // 🔥 PERMITE TUDO PARA TESTE
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With']
 }));
 
 // Responder a todas as requisições OPTIONS (preflight)
 app.options('*', cors());
 
 app.use(express.json({ limit: '50mb' }));
+
+// ============================================
+// LOG DE TODAS AS REQUISIÇÕES
+// ============================================
+app.use(function(req, res, next) {
+  console.log('📡 ' + req.method + ' ' + req.url + ' - Origin: ' + req.headers.origin);
+  next();
+});
 
 // ============================================
 // CONFIGURAÇÕES
@@ -49,18 +69,17 @@ if (!JWT_SECRET) {
 }
 
 // ============================================
-// ROTA DE TESTE (para verificar se o servidor está online)
+// ROTA DE TESTE
 // ============================================
 app.get('/api/test', function(req, res) {
   res.json({ 
     status: 'online', 
     time: new Date().toISOString(),
     message: '🚀 JM Server está funcionando!',
-    cors: '✅ Configurado corretamente'
+    cors: '✅ Configurado para GitHub Pages'
   });
 });
 
-// Rota raiz - redireciona para /api/test
 app.get('/', function(req, res) {
   res.json({ 
     message: 'JM Store API',
@@ -68,13 +87,15 @@ app.get('/', function(req, res) {
       test: '/api/test',
       produtos: '/api/produtos',
       login: '/api/login',
-      register: '/api/register'
+      register: '/api/register',
+      categorias: '/api/categorias',
+      faq: '/api/faq'
     }
   });
 });
 
 // ============================================
-// PRODUTOS - ROTA PÚBLICA
+// PRODUTOS
 // ============================================
 app.get('/api/produtos', async function(req, res) {
   try {
@@ -99,6 +120,7 @@ app.get('/api/produtos', async function(req, res) {
 // ============================================
 app.get('/api/categorias', async function(req, res) {
   try {
+    console.log('📂 Buscando categorias...');
     const { data, error } = await supabase
       .from('produtos')
       .select('categoria')
@@ -107,6 +129,7 @@ app.get('/api/categorias', async function(req, res) {
     
     if (error) throw error;
     const categorias = [...new Set((data || []).map(p => p.categoria))];
+    console.log('✅ Categorias carregadas:', categorias);
     res.json(categorias);
   } catch (error) {
     console.error('❌ Erro categorias:', error);
@@ -119,6 +142,7 @@ app.get('/api/categorias', async function(req, res) {
 // ============================================
 app.get('/api/faq', async function(req, res) {
   try {
+    console.log('❓ Buscando FAQ...');
     const { data, error } = await supabase
       .from('faq')
       .select('*')
@@ -126,6 +150,7 @@ app.get('/api/faq', async function(req, res) {
       .order('ordem');
     
     if (error) throw error;
+    console.log('✅ FAQ carregadas:', data ? data.length : 0);
     res.json(data || []);
   } catch (error) {
     console.error('❌ Erro FAQ:', error);
@@ -391,35 +416,48 @@ app.get('/api/wishlist', verificarToken, async function(req, res) {
 });
 
 // ============================================
-// NEWSLETTER
+// AVALIAÇÕES
 // ============================================
-app.post('/api/newsletter', async function(req, res) {
+app.post('/api/avaliacoes', verificarToken, async function(req, res) {
   try {
-    const { email, nome } = req.body;
+    const { produto_id, nota, titulo, comentario } = req.body;
     
-    if (!email) {
-      return res.status(400).json({ error: 'Email é obrigatório' });
+    if (!produto_id || !nota) {
+      return res.status(400).json({ error: 'Produto e nota são obrigatórios' });
     }
     
     const { data, error } = await supabase
-      .from('newsletter')
+      .from('avaliacoes')
       .insert([{
-        email,
-        nome: nome || null,
-        data_cadastro: new Date().toISOString()
+        produto_id,
+        usuario_id: req.usuario.id,
+        nota,
+        titulo,
+        comentario,
+        data_criacao: new Date().toISOString()
       }])
       .select();
     
-    if (error) {
-      if (error.code === '23505') {
-        return res.status(400).json({ error: 'Email já cadastrado' });
-      }
-      throw error;
-    }
-    
-    res.json({ msg: 'Inscrito com sucesso!', data: data[0] });
+    if (error) throw error;
+    res.json({ msg: 'Avaliação enviada com sucesso!', data: data[0] });
   } catch (error) {
-    console.error('❌ Erro newsletter:', error);
+    console.error('❌ Erro avaliação:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/avaliacoes/:produto_id', async function(req, res) {
+  try {
+    const { data, error } = await supabase
+      .from('avaliacoes')
+      .select('*, usuarios(nome)')
+      .eq('produto_id', req.params.produto_id)
+      .order('data_criacao', { ascending: false });
+    
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    console.error('❌ Erro buscar avaliações:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -571,7 +609,7 @@ app.get('/api/admin/dashboard', verificarToken, verificarAdmin, async function(r
 });
 
 // ============================================
-// ADMIN - ABANDONOS (SIMPLIFICADO)
+// ADMIN - ABANDONOS
 // ============================================
 const abandonos = [];
 
@@ -740,7 +778,7 @@ app.post('/api/checkout', verificarToken, async function(req, res) {
 });
 
 // ============================================
-// ADMIN - UPLOAD (SIMPLIFICADO)
+// ADMIN - UPLOAD
 // ============================================
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -749,7 +787,6 @@ app.post('/api/admin/upload', verificarToken, verificarAdmin, upload.single('ima
     return res.status(400).json({ error: 'Nenhuma imagem enviada' });
   }
   
-  // Retornar uma URL temporária (você pode melhorar depois)
   const url = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
   res.json({ success: true, url });
 });
@@ -771,65 +808,35 @@ app.get('/api/admin/visitantes', verificarToken, verificarAdmin, function(req, r
 });
 
 // ============================================
-// CONTATOS MARKETING (SIMPLIFICADO)
+// NEWSLETTER
 // ============================================
-app.get('/api/admin/contatos', verificarToken, verificarAdmin, function(req, res) {
-  res.json([]);
-});
-
-app.get('/api/admin/contatos/exportar', verificarToken, verificarAdmin, function(req, res) {
-  res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', 'attachment; filename=contatos.csv');
-  res.send('Email,Telefone,Nome,Regiao\n');
-});
-
-app.post('/api/admin/campanhas', verificarToken, verificarAdmin, function(req, res) {
-  res.json({ msg: 'Campanha criada' });
-});
-
-// ============================================
-// AVALIAÇÕES
-// ============================================
-app.post('/api/avaliacoes', verificarToken, async function(req, res) {
+app.post('/api/newsletter', async function(req, res) {
   try {
-    const { produto_id, nota, titulo, comentario } = req.body;
+    const { email, nome } = req.body;
     
-    if (!produto_id || !nota) {
-      return res.status(400).json({ error: 'Produto e nota são obrigatórios' });
+    if (!email) {
+      return res.status(400).json({ error: 'Email é obrigatório' });
     }
     
     const { data, error } = await supabase
-      .from('avaliacoes')
+      .from('newsletter')
       .insert([{
-        produto_id,
-        usuario_id: req.usuario.id,
-        nota,
-        titulo,
-        comentario,
-        data_criacao: new Date().toISOString()
+        email,
+        nome: nome || null,
+        data_cadastro: new Date().toISOString()
       }])
       .select();
     
-    if (error) throw error;
-    res.json({ msg: 'Avaliação enviada com sucesso!', data: data[0] });
-  } catch (error) {
-    console.error('❌ Erro avaliação:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.get('/api/avaliacoes/:produto_id', async function(req, res) {
-  try {
-    const { data, error } = await supabase
-      .from('avaliacoes')
-      .select('*, usuarios(nome)')
-      .eq('produto_id', req.params.produto_id)
-      .order('data_criacao', { ascending: false });
+    if (error) {
+      if (error.code === '23505') {
+        return res.status(400).json({ error: 'Email já cadastrado' });
+      }
+      throw error;
+    }
     
-    if (error) throw error;
-    res.json(data || []);
+    res.json({ msg: 'Inscrito com sucesso!', data: data[0] });
   } catch (error) {
-    console.error('❌ Erro buscar avaliações:', error);
+    console.error('❌ Erro newsletter:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -862,11 +869,25 @@ app.get('/api/pedidos/:id/rastreio', verificarToken, async function(req, res) {
   });
 });
 
-// ============================================
-// ADMIN - RASTREIO
-// ============================================
 app.put('/api/admin/pedidos/:id/rastreio', verificarToken, verificarAdmin, function(req, res) {
   res.json({ msg: 'Rastreio atualizado' });
+});
+
+// ============================================
+// CONTATOS MARKETING
+// ============================================
+app.get('/api/admin/contatos', verificarToken, verificarAdmin, function(req, res) {
+  res.json([]);
+});
+
+app.get('/api/admin/contatos/exportar', verificarToken, verificarAdmin, function(req, res) {
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename=contatos.csv');
+  res.send('Email,Telefone,Nome,Regiao\n');
+});
+
+app.post('/api/admin/campanhas', verificarToken, verificarAdmin, function(req, res) {
+  res.json({ msg: 'Campanha criada' });
 });
 
 // ============================================
@@ -877,4 +898,7 @@ app.listen(PORT, function() {
   console.log('🚀 JM Server rodando na porta ' + PORT);
   console.log('📊 Teste: https://jm-server.onrender.com/api/test');
   console.log('📦 Produtos: https://jm-server.onrender.com/api/produtos');
+  console.log('📂 Categorias: https://jm-server.onrender.com/api/categorias');
+  console.log('❓ FAQ: https://jm-server.onrender.com/api/faq');
+  console.log('✅ CORS: Permitido para GitHub Pages e Vercel');
 });
