@@ -1055,6 +1055,11 @@ app.post('/api/newsletter', async function(req, res) {
 // ============================================
 // PEDIDOS
 // ============================================
+// ============================================
+// PEDIDOS E RASTREIO - CORRIGIDO
+// ============================================
+
+// Listar pedidos do usuário
 app.get('/api/pedidos', verificarToken, async function(req, res) {
   try {
     const { data, error } = await supabase
@@ -1071,17 +1076,73 @@ app.get('/api/pedidos', verificarToken, async function(req, res) {
   }
 });
 
+// Usuário ver rastreio do pedido (BUSCA DO BANCO)
 app.get('/api/pedidos/:id/rastreio', verificarToken, async function(req, res) {
-  res.json({
-    codigo_rastreio: null,
-    transportadora: 'JM Express',
-    status: 'Pendente',
-    historico_rastreio: []
-  });
+  try {
+    const { data, error } = await supabase
+      .from('pedidos')
+      .select('codigo_rastreio, transportadora, status, status_atualizado_em, historico_rastreio')
+      .eq('id', req.params.id)
+      .eq('usuario_id', req.usuario.id)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({ error: 'Pedido não encontrado' });
+      }
+      throw error;
+    }
+
+    res.json(data);
+  } catch (error) {
+    console.error('❌ Erro ao buscar rastreio:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
-app.put('/api/admin/pedidos/:id/rastreio', verificarToken, verificarAdmin, function(req, res) {
-  res.json({ msg: 'Rastreio atualizado' });
+// Admin atualizar rastreio (SALVA NO BANCO)
+app.put('/api/admin/pedidos/:id/rastreio', verificarToken, verificarAdmin, async function(req, res) {
+  try {
+    const { codigo_rastreio, transportadora, status, observacao } = req.body;
+    const pedidoId = req.params.id;
+
+    // Buscar pedido atual
+    const { data: pedido, error: errBusca } = await supabase
+      .from('pedidos')
+      .select('historico_rastreio, status')
+      .eq('id', pedidoId)
+      .single();
+
+    if (errBusca) {
+      return res.status(404).json({ error: 'Pedido não encontrado' });
+    }
+
+    // Adicionar ao histórico
+    const historico = pedido.historico_rastreio || [];
+    historico.push({
+      status: status || 'Atualizado',
+      observacao: observacao || '',
+      data: new Date().toISOString()
+    });
+
+    const { data, error } = await supabase
+      .from('pedidos')
+      .update({
+        codigo_rastreio: codigo_rastreio || null,
+        transportadora: transportadora || 'JM Express',
+        status: status || pedido.status,
+        status_atualizado_em: new Date().toISOString(),
+        historico_rastreio: historico
+      })
+      .eq('id', pedidoId)
+      .select();
+
+    if (error) throw error;
+    res.json({ msg: 'Rastreio atualizado', data: data[0] });
+  } catch (error) {
+    console.error('❌ Erro ao atualizar rastreio:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // ============================================
@@ -1103,7 +1164,7 @@ if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
 }
 
 // ============================================
-// FUNÇÃO PARA ENVIAR NOTIFICAÇÃO
+// FUNÇÃO PARA ENVIAR NOTIFICAÇÃO (CORRIGIDA)
 // ============================================
 async function enviarNotificacaoEmail(tipo, dados) {
   if (!transporter) {
@@ -1115,45 +1176,68 @@ async function enviarNotificacaoEmail(tipo, dados) {
     let assunto = '';
     let html = '';
 
+    // Garantir que dados existem
+    const safeDados = dados || {};
+
     if (tipo === 'novo_usuario') {
       assunto = '🆕 Novo Usuário Cadastrado - JM Store';
       html = `
         <h2>🆕 Novo Usuário Cadastrado</h2>
-        <p><strong>Nome:</strong> ${dados.nome || 'Não informado'}</p>
-        <p><strong>Email:</strong> ${dados.email || 'Não informado'}</p>
-        <p><strong>Telefone:</strong> ${dados.telefone || 'Não informado'}</p>
-        <p><strong>Região:</strong> ${dados.regiao || 'Não informado'}</p>
+        <p><strong>Nome:</strong> ${safeDados.nome || 'Não informado'}</p>
+        <p><strong>Email:</strong> ${safeDados.email || 'Não informado'}</p>
+        <p><strong>Telefone:</strong> ${safeDados.telefone || 'Não informado'}</p>
+        <p><strong>Região:</strong> ${safeDados.regiao || 'Não informado'}</p>
         <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
       `;
     } else if (tipo === 'pedido_finalizado') {
-      assunto = '🛍️ Novo Pedido Finalizado - JM Store #' + dados.pedido_id;
+      assunto = '🛍️ Novo Pedido Finalizado - JM Store #' + (safeDados.pedido_id || 'PENDENTE');
+      
+      let itensHtml = '';
+      if (safeDados.itens && Array.isArray(safeDados.itens)) {
+        itensHtml = safeDados.itens.map(i => 
+          `<p>${i.nome || 'Produto'} x${i.quantidade || 1} = ${((i.preco || 0) * (i.quantidade || 1)).toLocaleString('pt-PT')} KZ</p>`
+        ).join('');
+      } else {
+        itensHtml = '<p>Nenhum item listado</p>';
+      }
+
       html = `
         <h2>🛍️ NOVO PEDIDO FINALIZADO</h2>
-        <p><strong>Pedido #:</strong> ${dados.pedido_id}</p>
+        <p><strong>Pedido #:</strong> ${safeDados.pedido_id || 'PENDENTE'}</p>
         <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
         <h3>👤 DADOS DO CLIENTE</h3>
-        <p><strong>Nome:</strong> ${dados.nome || 'Não informado'}</p>
-        <p><strong>Email:</strong> ${dados.email || 'Não informado'}</p>
-        <p><strong>Telefone:</strong> ${dados.telefone || 'Não informado'}</p>
-        <p><strong>Região:</strong> ${dados.regiao || 'Não informado'}</p>
-        <p><strong>Endereço:</strong> ${dados.endereco || 'Não informado'}</p>
+        <p><strong>Nome:</strong> ${safeDados.nome || 'Não informado'}</p>
+        <p><strong>Email:</strong> ${safeDados.email || 'Não informado'}</p>
+        <p><strong>Telefone:</strong> ${safeDados.telefone || 'Não informado'}</p>
+        <p><strong>Região:</strong> ${safeDados.regiao || 'Não informado'}</p>
+        <p><strong>Endereço:</strong> ${safeDados.endereco || 'Não informado'}</p>
         <h3>📋 ITENS DO PEDIDO</h3>
-        ${dados.itens.map(i => `<p>${i.nome} x${i.quantidade} = ${(i.preco * i.quantidade).toLocaleString('pt-PT')} KZ</p>`).join('')}
-        <h3>💰 TOTAL: ${dados.total.toLocaleString('pt-PT')} KZ</h3>
-        <p><strong>Pagamento:</strong> ${dados.metodo_pagamento || 'WhatsApp'}</p>
+        ${itensHtml}
+        <h3>💰 TOTAL: ${(safeDados.total || 0).toLocaleString('pt-PT')} KZ</h3>
+        <p><strong>Pagamento:</strong> ${safeDados.metodo_pagamento || 'WhatsApp'}</p>
       `;
     } else if (tipo === 'abandono') {
       assunto = '🛒 Carrinho Abandonado - JM Store';
+      
+      let itensHtml = '';
+      if (safeDados.itens && Array.isArray(safeDados.itens)) {
+        itensHtml = safeDados.itens.map(i => 
+          `<p>${i.nome || 'Produto'} x${i.quantidade || 1} = ${((i.preco || 0) * (i.quantidade || 1)).toLocaleString('pt-PT')} KZ</p>`
+        ).join('');
+      } else {
+        itensHtml = '<p>Nenhum item no carrinho</p>';
+      }
+
       html = `
         <h2>🛒 CARRINHO ABANDONADO</h2>
         <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
         <h3>👤 DADOS DO CLIENTE</h3>
-        <p><strong>Nome:</strong> ${dados.nome || 'Visitante'}</p>
-        <p><strong>Email:</strong> ${dados.email || 'Não informado'}</p>
-        <p><strong>Telefone:</strong> ${dados.telefone || 'Não informado'}</p>
+        <p><strong>Nome:</strong> ${safeDados.nome || 'Visitante'}</p>
+        <p><strong>Email:</strong> ${safeDados.email || 'Não informado'}</p>
+        <p><strong>Telefone:</strong> ${safeDados.telefone || 'Não informado'}</p>
         <h3>📋 ITENS NO CARRINHO</h3>
-        ${dados.itens.map(i => `<p>${i.nome} x${i.quantidade} = ${(i.preco * i.quantidade).toLocaleString('pt-PT')} KZ</p>`).join('')}
-        <h3>💰 TOTAL: ${dados.total.toLocaleString('pt-PT')} KZ</h3>
+        ${itensHtml}
+        <h3>💰 TOTAL: ${(safeDados.total || 0).toLocaleString('pt-PT')} KZ</h3>
       `;
     }
 
@@ -1171,7 +1255,6 @@ async function enviarNotificacaoEmail(tipo, dados) {
     return false;
   }
 }
-
 // ============================================
 // INICIAR SERVIDOR
 // ============================================
