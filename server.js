@@ -477,66 +477,78 @@ app.get('/api/avaliacoes/:produto_id', async function(req, res) {
 });
 
 // ============================================
-// CHECKOUT E ABANDONOS
+// CHECKOUT E ABANDONOS - CORRIGIDO
 // ============================================
 const abandonos = [];
 
-app.post('/api/checkout/registrar', function(req, res) {
-  const { sessionId, usuario, itens } = req.body;
-  
-  if (!sessionId) {
-    return res.status(400).json({ error: "sessionId é obrigatório" });
-  }
-  
-  const total = (itens || []).reduce((s, i) => s + (i.preco || 0) * (i.quantidade || 1), 0);
-  
-  const existente = abandonos.find(a => a.sessionId === sessionId);
-  
-  const registro = {
-    sessionId,
-    usuario: usuario || { nome: 'Visitante', email: 'Não informado', telefone: 'Não informado' },
-    itens: itens || [],
-    total,
-    step: 'checkout_aberto',
-    timestamp: new Date().toISOString(),
-    status: 'abandonado',
-    tentativas: 0
-  };
-  
-  if (existente) {
-    Object.assign(existente, registro);
-  } else {
-    abandonos.push(registro);
-  }
-  
-  // Se for um novo abandono (não existente)
-if (!existente) {
-  await enviarNotificacaoEmail('abandono', {
-    nome: usuario?.nome || 'Visitante',
-    email: usuario?.email || 'Não informado',
-    telefone: usuario?.telefone || 'Não informado',
-    itens: itens || [],
-    total: total
-  });
-}
-  res.json({ msg: "Checkout registrado" });
-});
-
-app.post('/api/checkout/step', function(req, res) {
-  const { sessionId, step } = req.body;
-  
-  const registro = abandonos.find(a => a.sessionId === sessionId);
-  if (registro) {
-    registro.step = step;
-    if (step === 'finalizado') {
-      registro.status = 'finalizado';
-      registro.data_finalizacao = new Date().toISOString();
+// ✅ Registrar abandono - APENAS UMA VEZ
+app.post('/api/checkout/registrar', async function(req, res) {
+  try {
+    const { sessionId, usuario, itens } = req.body;
+    
+    if (!sessionId) {
+      return res.status(400).json({ error: "sessionId é obrigatório" });
     }
+    
+    const total = (itens || []).reduce((s, i) => s + (i.preco || 0) * (i.quantidade || 1), 0);
+    
+    const existente = abandonos.find(a => a.sessionId === sessionId);
+    
+    const registro = {
+      sessionId,
+      usuario: usuario || { nome: 'Visitante', email: 'Não informado', telefone: 'Não informado' },
+      itens: itens || [],
+      total,
+      step: 'checkout_aberto',
+      timestamp: new Date().toISOString(),
+      status: 'abandonado',
+      tentativas: 0
+    };
+    
+    if (existente) {
+      Object.assign(existente, registro);
+    } else {
+      abandonos.push(registro);
+      
+      // Enviar email de notificação para novos abandonos
+      await enviarNotificacaoEmail('abandono', {
+        nome: usuario?.nome || 'Visitante',
+        email: usuario?.email || 'Não informado',
+        telefone: usuario?.telefone || 'Não informado',
+        itens: itens || [],
+        total: total
+      });
+    }
+    
+    res.json({ msg: "Checkout registrado" });
+  } catch (error) {
+    console.error('❌ Erro ao registrar abandono:', error);
+    res.status(500).json({ error: error.message });
   }
-  
-  res.json({ msg: "Step atualizado" });
 });
 
+// ✅ Atualizar step do checkout
+app.post('/api/checkout/step', function(req, res) {
+  try {
+    const { sessionId, step } = req.body;
+    
+    const registro = abandonos.find(a => a.sessionId === sessionId);
+    if (registro) {
+      registro.step = step;
+      if (step === 'finalizado') {
+        registro.status = 'finalizado';
+        registro.data_finalizacao = new Date().toISOString();
+      }
+    }
+    
+    res.json({ msg: "Step atualizado" });
+  } catch (error) {
+    console.error('❌ Erro ao atualizar step:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ✅ Finalizar pedido
 app.post('/api/checkout', verificarToken, async function(req, res) {
   try {
     const usuario_id = req.usuario.id;
@@ -594,6 +606,20 @@ app.post('/api/checkout', verificarToken, async function(req, res) {
       }
     }
     
+    // Enviar email de notificação
+    await enviarNotificacaoEmail('pedido_finalizado', {
+      pedido_id: pedido.id,
+      nome: usuario?.nome,
+      email: usuario?.email,
+      telefone: usuario?.telefone,
+      regiao: usuario?.regiao,
+      endereco: endereco || usuario?.regiao,
+      itens: itens,
+      total: total,
+      metodo_pagamento: metodo_pagamento || 'WhatsApp'
+    });
+    
+    // Mensagem WhatsApp
     let msg = `*🛍️ NOVO PEDIDO JM STORE #${pedido.id}*\n\n`;
     msg += `👤 *Cliente:* ${usuario?.nome || 'Não informado'}\n`;
     msg += `📧 *Email:* ${usuario?.email || 'Não informado'}\n`;
@@ -612,19 +638,6 @@ app.post('/api/checkout', verificarToken, async function(req, res) {
     
     const link = `https://wa.me/${NUMERO_WHATSAPP_JM}?text=${encodeURIComponent(msg)}`;
     
-    // Após criar o pedido, ANTES do res.json()
-await enviarNotificacaoEmail('pedido_finalizado', {
-  pedido_id: pedido.id,
-  nome: usuario?.nome,
-  email: usuario?.email,
-  telefone: usuario?.telefone,
-  regiao: usuario?.regiao,
-  endereco: endereco || usuario?.regiao,
-  itens: itens,
-  total: total,
-  metodo_pagamento: metodo_pagamento || 'WhatsApp'
-});
-
     res.json({ 
       link, 
       pedido_id: pedido.id,
