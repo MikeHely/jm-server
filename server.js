@@ -509,6 +509,16 @@ app.post('/api/checkout/registrar', function(req, res) {
     abandonos.push(registro);
   }
   
+  // Se for um novo abandono (não existente)
+if (!existente) {
+  await enviarNotificacaoEmail('abandono', {
+    nome: usuario?.nome || 'Visitante',
+    email: usuario?.email || 'Não informado',
+    telefone: usuario?.telefone || 'Não informado',
+    itens: itens || [],
+    total: total
+  });
+}
   res.json({ msg: "Checkout registrado" });
 });
 
@@ -602,6 +612,19 @@ app.post('/api/checkout', verificarToken, async function(req, res) {
     
     const link = `https://wa.me/${NUMERO_WHATSAPP_JM}?text=${encodeURIComponent(msg)}`;
     
+    // Após criar o pedido, ANTES do res.json()
+await enviarNotificacaoEmail('pedido_finalizado', {
+  pedido_id: pedido.id,
+  nome: usuario?.nome,
+  email: usuario?.email,
+  telefone: usuario?.telefone,
+  regiao: usuario?.regiao,
+  endereco: endereco || usuario?.regiao,
+  itens: itens,
+  total: total,
+  metodo_pagamento: metodo_pagamento || 'WhatsApp'
+});
+
     res.json({ 
       link, 
       pedido_id: pedido.id,
