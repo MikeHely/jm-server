@@ -770,24 +770,54 @@ app.post('/api/admin/imagens', verificarToken, verificarAdmin, async function(re
 });
 
 // ============================================
-// ADMIN - UPLOAD
+// ADMIN - UPLOAD DE IMAGENS (CORRIGIDO)
 // ============================================
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }
+});
 
-app.post('/api/admin/upload', verificarToken, verificarAdmin, upload.single('imagem'), function(req, res) {
+app.post('/api/admin/upload', verificarToken, verificarAdmin, upload.single('imagem'), async function(req, res) {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'Nenhuma imagem enviada' });
     }
+
+    console.log('📸 Recebendo upload:', req.file.originalname, req.file.size + ' bytes');
+
+    // Gerar nome único
+    const ext = req.file.originalname.split('.').pop().toLowerCase();
+    const nome = `${Date.now()}_${Math.random().toString(36).substr(2, 6)}.${ext}`;
+
+    // URL base do servidor
+    const baseUrl = req.protocol + '://' + req.get('host');
     
-    const url = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
-    res.json({ success: true, url });
+    // Salvar imagem no cache em memória (ou poderíamos salvar no Supabase Storage)
+    // Para simplificar, vamos retornar uma URL com base64 para teste
+    const base64 = req.file.buffer.toString('base64');
+    const url = `data:${req.file.mimetype};base64,${base64}`;
+    
+    // Limitar tamanho da URL (para não sobrecarregar)
+    // Em produção, use Supabase Storage ou outro serviço
+    
+    // Opção 1: Retornar base64 (funciona mas pode ser grande)
+    // res.json({ success: true, url: url });
+    
+    // Opção 2: Retornar uma URL simulada (para desenvolvimento)
+    // Em produção, você deve fazer upload para o Supabase Storage
+    
+    // Vamos usar a opção base64 (funciona para imagens pequenas)
+    res.json({ 
+      success: true, 
+      url: url,
+      message: 'Imagem recebida com sucesso!'
+    });
+
   } catch (error) {
-    console.error('❌ Erro upload:', error);
-    res.status(500).json({ error: error.message });
+    console.error('❌ Erro no upload:', error);
+    res.status(500).json({ error: 'Erro ao processar upload: ' + error.message });
   }
 });
-
 // ============================================
 // ADMIN - ABANDONOS
 // ============================================
@@ -884,90 +914,82 @@ app.get('/api/admin/dashboard', verificarToken, verificarAdmin, async function(r
 });
 
 // ============================================
-// VISITANTES - COMPLETO
+// VISITANTES - CORRIGIDO
 // ============================================
 
 // Registrar visita
 app.post('/api/visitantes/registrar', async function(req, res) {
   try {
-    const { sessionId, pagina, userAgent } = req.body;
-    const ip = req.ip || req.connection.remoteAddress || req.socket.remoteAddress || '0.0.0.0';
-    const ua = userAgent || req.headers['user-agent'] || 'Desconhecido';
+    const { sessionId, pagina } = req.body;
+    const ip = req.headers['x-forwarded-for'] || req.ip || req.connection.remoteAddress || '0.0.0.0';
+    const userAgent = req.headers['user-agent'] || 'Desconhecido';
     
     if (!sessionId) {
       return res.status(400).json({ error: 'sessionId é obrigatório' });
     }
 
-    // Insere no banco de dados (se a tabela existir)
+    console.log('📊 Registrando visita:', sessionId, pagina);
+
     const { data, error } = await supabase
       .from('visitantes')
       .insert([{
         session_id: sessionId,
         ip: ip,
-        user_agent: ua,
+        user_agent: userAgent,
         pagina: pagina || '/',
         data_visita: new Date().toISOString()
       }])
       .select();
 
     if (error) {
-      // Se a tabela não existir, apenas loga
-      console.warn('Tabela visitantes não encontrada:', error.message);
-      return res.json({ msg: 'Visita registrada (modo demo)' });
+      console.error('❌ Erro ao inserir visitante:', error);
+      return res.status(500).json({ error: error.message });
     }
 
     console.log('✅ Visita registrada:', sessionId);
-    res.json({ msg: 'Visita registrada', data: data });
+    res.json({ msg: 'Visita registrada', data: data[0] });
   } catch (error) {
-    console.error('Erro ao registrar visita:', error);
-    // Não falha a requisição, apenas retorna ok
-    res.json({ msg: 'Visita registrada (com erro)' });
+    console.error('❌ Erro ao registrar visita:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
 // Admin - Estatísticas de visitantes
 app.get('/api/admin/visitantes', verificarToken, verificarAdmin, async function(req, res) {
   try {
-    // Tenta buscar do banco de dados
-    const { data: totalVisitas, error: errTotal } = await supabase
+    // Total de visitas
+    const { count: totalVisitas, error: errTotal } = await supabase
       .from('visitantes')
       .select('*', { count: 'exact', head: true });
 
-    if (errTotal) {
-      // Se a tabela não existe, retorna dados demo
-      return res.json({
-        total: Math.floor(Math.random() * 100) + 50,
-        hoje: Math.floor(Math.random() * 20) + 5,
-        unicos: Math.floor(Math.random() * 30) + 10,
-        ultimas: [
-          { pagina: '/', data_visita: new Date().toISOString(), user_agent: 'Chrome/120' },
-          { pagina: '/produtos', data_visita: new Date().toISOString(), user_agent: 'Firefox/121' },
-          { pagina: '/admin.html', data_visita: new Date().toISOString(), user_agent: 'Safari/17' }
-        ]
-      });
-    }
+    if (errTotal) throw errTotal;
 
     // Visitas hoje
     const hoje = new Date().toISOString().split('T')[0];
-    const { data: visitasHoje, error: errHoje } = await supabase
+    const { count: visitasHoje, error: errHoje } = await supabase
       .from('visitantes')
       .select('*', { count: 'exact', head: true })
       .gte('data_visita', hoje);
 
-    // Visitantes únicos
+    if (errHoje) throw errHoje;
+
+    // Visitantes únicos (por session_id)
     const { data: visitantesUnicos, error: errUnicos } = await supabase
       .from('visitantes')
-      .select('session_id')
-      .order('session_id');
+      .select('session_id');
+
+    if (errUnicos) throw errUnicos;
 
     const unicos = visitantesUnicos ? [...new Set(visitantesUnicos.map(v => v.session_id))] : [];
 
-    // Últimas visitas
+    // Últimas visitas (20)
     const { data: ultimasVisitas, error: errUltimas } = await supabase
       .from('visitantes')
       .select('*')
       .order('data_visita', { ascending: false })
       .limit(20);
+
+    if (errUltimas) throw errUltimas;
 
     res.json({
       total: totalVisitas || 0,
@@ -976,17 +998,10 @@ app.get('/api/admin/visitantes', verificarToken, verificarAdmin, async function(
       ultimas: ultimasVisitas || []
     });
   } catch (error) {
-    console.error('Erro ao buscar estatísticas:', error);
-    res.json({
-      total: 0,
-      hoje: 0,
-      unicos: 0,
-      ultimas: []
-    });
+    console.error('❌ Erro ao buscar estatísticas:', error);
+    res.status(500).json({ error: error.message });
   }
-});
-
-// ============================================
+});// ============================================
 // ADMIN - MARKETING
 // ============================================
 app.get('/api/admin/contatos', verificarToken, verificarAdmin, function(req, res) {
@@ -1068,6 +1083,94 @@ app.get('/api/pedidos/:id/rastreio', verificarToken, async function(req, res) {
 app.put('/api/admin/pedidos/:id/rastreio', verificarToken, verificarAdmin, function(req, res) {
   res.json({ msg: 'Rastreio atualizado' });
 });
+
+// ============================================
+// EMAIL CONFIG
+// ============================================
+let transporter = null;
+if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+  transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS
+    }
+  });
+  console.log('📧 Email configurado com sucesso!');
+  console.log('📧 Notificações serão enviadas para:', process.env.EMAIL_NOTIFICACAO);
+} else {
+  console.log('⚠️ Email não configurado (variáveis faltando)');
+}
+
+// ============================================
+// FUNÇÃO PARA ENVIAR NOTIFICAÇÃO
+// ============================================
+async function enviarNotificacaoEmail(tipo, dados) {
+  if (!transporter) {
+    console.log('⚠️ Email não enviado: transporte não configurado');
+    return false;
+  }
+
+  try {
+    let assunto = '';
+    let html = '';
+
+    if (tipo === 'novo_usuario') {
+      assunto = '🆕 Novo Usuário Cadastrado - JM Store';
+      html = `
+        <h2>🆕 Novo Usuário Cadastrado</h2>
+        <p><strong>Nome:</strong> ${dados.nome || 'Não informado'}</p>
+        <p><strong>Email:</strong> ${dados.email || 'Não informado'}</p>
+        <p><strong>Telefone:</strong> ${dados.telefone || 'Não informado'}</p>
+        <p><strong>Região:</strong> ${dados.regiao || 'Não informado'}</p>
+        <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
+      `;
+    } else if (tipo === 'pedido_finalizado') {
+      assunto = '🛍️ Novo Pedido Finalizado - JM Store #' + dados.pedido_id;
+      html = `
+        <h2>🛍️ NOVO PEDIDO FINALIZADO</h2>
+        <p><strong>Pedido #:</strong> ${dados.pedido_id}</p>
+        <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
+        <h3>👤 DADOS DO CLIENTE</h3>
+        <p><strong>Nome:</strong> ${dados.nome || 'Não informado'}</p>
+        <p><strong>Email:</strong> ${dados.email || 'Não informado'}</p>
+        <p><strong>Telefone:</strong> ${dados.telefone || 'Não informado'}</p>
+        <p><strong>Região:</strong> ${dados.regiao || 'Não informado'}</p>
+        <p><strong>Endereço:</strong> ${dados.endereco || 'Não informado'}</p>
+        <h3>📋 ITENS DO PEDIDO</h3>
+        ${dados.itens.map(i => `<p>${i.nome} x${i.quantidade} = ${(i.preco * i.quantidade).toLocaleString('pt-PT')} KZ</p>`).join('')}
+        <h3>💰 TOTAL: ${dados.total.toLocaleString('pt-PT')} KZ</h3>
+        <p><strong>Pagamento:</strong> ${dados.metodo_pagamento || 'WhatsApp'}</p>
+      `;
+    } else if (tipo === 'abandono') {
+      assunto = '🛒 Carrinho Abandonado - JM Store';
+      html = `
+        <h2>🛒 CARRINHO ABANDONADO</h2>
+        <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
+        <h3>👤 DADOS DO CLIENTE</h3>
+        <p><strong>Nome:</strong> ${dados.nome || 'Visitante'}</p>
+        <p><strong>Email:</strong> ${dados.email || 'Não informado'}</p>
+        <p><strong>Telefone:</strong> ${dados.telefone || 'Não informado'}</p>
+        <h3>📋 ITENS NO CARRINHO</h3>
+        ${dados.itens.map(i => `<p>${i.nome} x${i.quantidade} = ${(i.preco * i.quantidade).toLocaleString('pt-PT')} KZ</p>`).join('')}
+        <h3>💰 TOTAL: ${dados.total.toLocaleString('pt-PT')} KZ</h3>
+      `;
+    }
+
+    await transporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: process.env.EMAIL_NOTIFICACAO || process.env.EMAIL_USER,
+      subject: assunto,
+      html: html
+    });
+
+    console.log(`📧 Email enviado: ${tipo}`);
+    return true;
+  } catch (error) {
+    console.error('❌ Erro ao enviar email:', error);
+    return false;
+  }
+}
 
 // ============================================
 // INICIAR SERVIDOR
