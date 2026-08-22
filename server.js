@@ -943,23 +943,24 @@ app.get('/api/admin/dashboard', verificarToken, verificarAdmin, async function(r
 // Registrar visita
 app.post('/api/visitantes/registrar', async function(req, res) {
   try {
-    const { sessionId, pagina } = req.body;
+    const { sessionId, pagina, userAgent, localizacao } = req.body;
     const ip = req.headers['x-forwarded-for'] || req.ip || req.connection.remoteAddress || '0.0.0.0';
-    const userAgent = req.headers['user-agent'] || 'Desconhecido';
     
     if (!sessionId) {
       return res.status(400).json({ error: 'sessionId é obrigatório' });
     }
 
-    console.log('📊 Registrando visita:', sessionId, pagina);
-
+    // Adicionar país e região à visita
     const { data, error } = await supabase
       .from('visitantes')
       .insert([{
         session_id: sessionId,
         ip: ip,
-        user_agent: userAgent,
+        user_agent: userAgent || 'Desconhecido',
         pagina: pagina || '/',
+        pais: localizacao?.country || null,
+        regiao: localizacao?.region || null,
+        cidade: localizacao?.city || null,
         data_visita: new Date().toISOString()
       }])
       .select();
@@ -969,7 +970,7 @@ app.post('/api/visitantes/registrar', async function(req, res) {
       return res.status(500).json({ error: error.message });
     }
 
-    console.log('✅ Visita registrada:', sessionId);
+    console.log(`✅ Visita registrada: ${sessionId} (${localizacao?.country || 'Desconhecido'})`);
     res.json({ msg: 'Visita registrada', data: data[0] });
   } catch (error) {
     console.error('❌ Erro ao registrar visita:', error);
@@ -1024,7 +1025,10 @@ app.get('/api/admin/visitantes', verificarToken, verificarAdmin, async function(
     console.error('❌ Erro ao buscar estatísticas:', error);
     res.status(500).json({ error: error.message });
   }
-});// ============================================
+});
+
+
+// ============================================
 // ADMIN - MARKETING
 // ============================================
 app.get('/api/admin/contatos', verificarToken, verificarAdmin, function(req, res) {
@@ -1278,6 +1282,68 @@ async function enviarNotificacaoEmail(tipo, dados) {
     return false;
   }
 }
+
+// ============================================
+// GEOLOCALIZAÇÃO - IP API
+// ============================================
+
+// Buscar localização do visitante (via IP)
+app.get('/api/geolocalizacao', async function(req, res) {
+  try {
+    // Pega o IP do visitante
+    const ip = req.headers['x-forwarded-for'] || req.ip || req.connection.remoteAddress || '0.0.0.0';
+    
+    // Remove "::ffff:" se existir (IPv6 mapeado)
+    const ipClean = ip.replace('::ffff:', '');
+    
+    // Se for localhost ou IP interno, retorna dados de teste
+    if (ipClean === '127.0.0.1' || ipClean === 'localhost' || ipClean.startsWith('192.168.') || ipClean.startsWith('10.')) {
+      return res.json({
+        ip: ipClean,
+        country: 'AO',
+        country_name: 'Angola',
+        region: 'Luanda',
+        city: 'Luanda',
+        isp: 'Localhost'
+      });
+    }
+    
+    console.log('📍 Buscando localização para IP:', ipClean);
+    
+    // Usa API gratuita ip-api.com
+    const response = await fetch(`http://ip-api.com/json/${ipClean}?fields=status,country,countryCode,regionName,city,isp,lat,lon`);
+    const data = await response.json();
+    
+    if (data.status === 'success') {
+      res.json({
+        ip: ipClean,
+        country: data.countryCode,
+        country_name: data.country,
+        region: data.regionName,
+        city: data.city,
+        isp: data.isp,
+        lat: data.lat,
+        lon: data.lon
+      });
+    } else {
+      res.json({
+        ip: ipClean,
+        country: 'Desconhecido',
+        region: 'Desconhecido',
+        city: 'Desconhecido'
+      });
+    }
+  } catch (error) {
+    console.error('❌ Erro na geolocalização:', error);
+    res.json({
+      ip: 'Erro',
+      country: 'Erro',
+      region: 'Erro',
+      city: 'Erro'
+    });
+  }
+});
+
 // ============================================
 // INICIAR SERVIDOR
 // ============================================
