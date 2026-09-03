@@ -56,7 +56,7 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-const NUMERO_WHATSAPP_JM = "244949321312";
+const NUMERO_WHATSAPP_JM = "244953652742";
 const JWT_SECRET = process.env.JWT_SECRET;
 
 if (!JWT_SECRET) {
