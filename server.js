@@ -1203,6 +1203,38 @@ if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
   console.log('⚠️ Email não configurado (variáveis faltando)');
 }
 
+
+
+
+
+
+
+// ⚠️ ROTA TEMPORÁRIA - REMOVER DEPOIS
+app.get('/api/test-email', async function(req, res) {
+  try {
+    if (!transporter) {
+      return res.status(500).json({ 
+        error: 'Transporter não configurado',
+        EMAIL_USER: process.env.EMAIL_USER ? 'Definido' : 'Faltando',
+        EMAIL_PASS: process.env.EMAIL_PASS ? 'Definido' : 'Faltando'
+      });
+    }
+    
+    await transporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: process.env.EMAIL_NOTIFICACAO || process.env.EMAIL_USER,
+      subject: '🧪 Teste JM Store',
+      html: '<h1>✅ Email funcionando!</h1><p>Se recebeu este email, está tudo OK!</p>'
+    });
+    
+    res.json({ success: true, msg: 'Email enviado! Verifique a caixa de entrada.' });
+  } catch (error) {
+    res.status(500).json({ 
+      error: error.message,
+      code: error.code 
+    });
+  }
+});
 // ============================================
 // FUNÇÃO PARA ENVIAR NOTIFICAÇÃO (CORRIGIDA)
 // ============================================
