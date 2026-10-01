@@ -244,7 +244,7 @@ app.post('/api/login', async function(req, res) {
       is_admin: !!data.is_admin 
     };
     
-    const token = jwt.sign(usuario, JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign(usuario, JWT_SECRET, { expiresIn: '90d' });
     
     console.log('✅ Login bem-sucedido:', email);
     res.json({ 
