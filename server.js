@@ -1185,23 +1185,167 @@ app.put('/api/admin/pedidos/:id/rastreio', verificarToken, verificarAdmin, async
   }
 });
 
+
+
+
+
+
 // ============================================
 // EMAIL CONFIG
 // ============================================
-let transporter = null;
-if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-  transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS
+app.post('/api/checkout/registrar', async function(req, res) {
+  try {
+    const { sessionId, usuario, itens } = req.body;
+    
+    if (!sessionId) {
+      return res.status(400).json({ error: "sessionId é obrigatório" });
     }
-  });
-  console.log('📧 Email configurado com sucesso!');
-  console.log('📧 Notificações serão enviadas para:', process.env.EMAIL_NOTIFICACAO);
-} else {
-  console.log('⚠️ Email não configurado (variáveis faltando)');
-}
+    
+    const total = (itens || []).reduce((s, i) => s + (i.preco || 0) * (i.quantidade || 1), 0);
+    
+    const existente = abandonos.find(a => a.sessionId === sessionId);
+    
+    const registro = {
+      sessionId,
+      usuario: usuario || { nome: 'Visitante', email: 'Não informado', telefone: 'Não informado' },
+      itens: itens || [],
+      total,
+      step: 'checkout_aberto',
+      timestamp: new Date().toISOString(),
+      status: 'abandonado',
+      tentativas: 0
+    };
+    
+    if (existente) {
+      Object.assign(existente, registro);
+    } else {
+      abandonos.push(registro);
+      
+      // ✅ EMAIL EM BACKGROUND (SEM AWAIT!)
+      enviarNotificacaoEmail('abandono', {
+        nome: usuario?.nome || 'Visitante',
+        email: usuario?.email || 'Não informado',
+        telefone: usuario?.telefone || 'Não informado',
+        itens: itens || [],
+        total: total
+      }).catch(err => console.error('Erro email abandono:', err));
+    }
+    
+    res.json({ msg: "Checkout registrado" });
+  } catch (error) {
+    console.error('❌ Erro ao registrar abandono:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/checkout', verificarToken, async function(req, res) {
+  try {
+    const usuario_id = req.usuario.id;
+    const { itens, endereco, metodo_pagamento, sessionId } = req.body;
+    
+    if (!itens || itens.length === 0) {
+      return res.status(400).json({ error: "Carrinho vazio" });
+    }
+    
+    const total = itens.reduce((s, i) => s + i.preco * i.quantidade, 0);
+    
+    // ✅ BUSCAR USUÁRIO E CRIAR PEDIDO EM PARALELO
+    const [usuarioResult, pedidoResult] = await Promise.all([
+      supabase
+        .from('usuarios')
+        .select('nome, telefone, regiao, email')
+        .eq('id', usuario_id)
+        .single(),
+      supabase
+        .from('pedidos')
+        .insert([{ 
+          usuario_id, 
+          total, 
+          status: 'Aguardando WhatsApp',
+          endereco: endereco || 'Não informado',
+          metodo_pagamento: metodo_pagamento || 'WhatsApp',
+          data_pedido: new Date().toISOString()
+        }])
+        .select()
+        .single()
+    ]);
+    
+    const usuario = usuarioResult.data;
+    const pedido = pedidoResult.data;
+    
+    if (pedidoResult.error) throw pedidoResult.error;
+    
+    // ✅ SALVAR ITENS E LIMPAR CARRINHO EM PARALELO
+    await Promise.all([
+      supabase.from('itens_pedido').insert(itens.map(i => ({
+        pedido_id: pedido.id,
+        produto_id: i.id,
+        quantidade: i.quantidade,
+        preco_unitario: i.preco
+      }))),
+      supabase.from('carrinho').delete().eq('usuario_id', usuario_id)
+    ]);
+    
+    // Atualizar abandono
+    if (sessionId) {
+      const abandono = abandonos.find(a => a.sessionId === sessionId);
+      if (abandono) {
+        abandono.status = 'finalizado';
+        abandono.data_finalizacao = new Date().toISOString();
+        abandono.pedido_id = pedido.id;
+      }
+    }
+    
+    // ✅ EMAIL EM BACKGROUND (SEM AWAIT!)
+    enviarNotificacaoEmail('pedido_finalizado', {
+      pedido_id: pedido.id,
+      nome: usuario?.nome,
+      email: usuario?.email,
+      telefone: usuario?.telefone,
+      regiao: usuario?.regiao,
+      endereco: endereco || usuario?.regiao,
+      itens: itens,
+      total: total,
+      metodo_pagamento: metodo_pagamento || 'WhatsApp'
+    }).catch(err => console.error('Erro email pedido:', err));
+    
+    // ✅ RESPONDER IMEDIATAMENTE
+    let msg = `*🛍️ NOVO PEDIDO JM STORE #${pedido.id}*\n\n`;
+    msg += `👤 *Cliente:* ${usuario?.nome || 'Não informado'}\n`;
+    msg += `📧 *Email:* ${usuario?.email || 'Não informado'}\n`;
+    msg += `📱 *Telefone:* ${usuario?.telefone || 'Não informado'}\n`;
+    msg += `📍 *Região:* ${usuario?.regiao || 'Não informado'}\n`;
+    msg += `📦 *Endereço:* ${endereco || usuario?.regiao || 'Não informado'}\n\n`;
+    msg += `*📋 ITENS DO PEDIDO:*\n`;
+    
+    itens.forEach((i, idx) => {
+      msg += `${idx + 1}. ${i.nome} x${i.quantidade} = ${(i.preco * i.quantidade).toLocaleString('pt-PT')} KZ\n`;
+    });
+    
+    msg += `\n*💰 TOTAL: ${total.toLocaleString('pt-PT')} KZ*`;
+    msg += `\n💳 *Pagamento:* ${metodo_pagamento || 'WhatsApp'}`;
+    msg += `\n\n🔗 *Pedido #${pedido.id}*`;
+    
+    const link = `https://wa.me/${NUMERO_WHATSAPP_JM}?text=${encodeURIComponent(msg)}`;
+    
+    res.json({ 
+      link, 
+      pedido_id: pedido.id,
+      pedido: {
+        id: pedido.id,
+        total,
+        status: pedido.status,
+        data: pedido.data_pedido
+      }
+    });
+  } catch (error) {
+    console.error('❌ Erro checkout:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+
 
 
 
@@ -1235,99 +1379,6 @@ app.get('/api/test-email', async function(req, res) {
     });
   }
 });
-// ============================================
-// FUNÇÃO PARA ENVIAR NOTIFICAÇÃO (CORRIGIDA)
-// ============================================
-async function enviarNotificacaoEmail(tipo, dados) {
-  if (!transporter) {
-    console.log('⚠️ Email não enviado: transporte não configurado');
-    return false;
-  }
-
-  try {
-    let assunto = '';
-    let html = '';
-
-    // Garantir que dados existem
-    const safeDados = dados || {};
-
-    if (tipo === 'novo_usuario') {
-      assunto = '🆕 Novo Usuário Cadastrado - JM Store';
-      html = `
-        <h2>🆕 Novo Usuário Cadastrado</h2>
-        <p><strong>Nome:</strong> ${safeDados.nome || 'Não informado'}</p>
-        <p><strong>Email:</strong> ${safeDados.email || 'Não informado'}</p>
-        <p><strong>Telefone:</strong> ${safeDados.telefone || 'Não informado'}</p>
-        <p><strong>Região:</strong> ${safeDados.regiao || 'Não informado'}</p>
-        <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
-      `;
-    } else if (tipo === 'pedido_finalizado') {
-      assunto = '🛍️ Novo Pedido Finalizado - JM Store #' + (safeDados.pedido_id || 'PENDENTE');
-      
-      let itensHtml = '';
-      if (safeDados.itens && Array.isArray(safeDados.itens)) {
-        itensHtml = safeDados.itens.map(i => 
-          `<p>${i.nome || 'Produto'} x${i.quantidade || 1} = ${((i.preco || 0) * (i.quantidade || 1)).toLocaleString('pt-PT')} KZ</p>`
-        ).join('');
-      } else {
-        itensHtml = '<p>Nenhum item listado</p>';
-      }
-
-      html = `
-        <h2>🛍️ NOVO PEDIDO FINALIZADO</h2>
-        <p><strong>Pedido #:</strong> ${safeDados.pedido_id || 'PENDENTE'}</p>
-        <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
-        <h3>👤 DADOS DO CLIENTE</h3>
-        <p><strong>Nome:</strong> ${safeDados.nome || 'Não informado'}</p>
-        <p><strong>Email:</strong> ${safeDados.email || 'Não informado'}</p>
-        <p><strong>Telefone:</strong> ${safeDados.telefone || 'Não informado'}</p>
-        <p><strong>Região:</strong> ${safeDados.regiao || 'Não informado'}</p>
-        <p><strong>Endereço:</strong> ${safeDados.endereco || 'Não informado'}</p>
-        <h3>📋 ITENS DO PEDIDO</h3>
-        ${itensHtml}
-        <h3>💰 TOTAL: ${(safeDados.total || 0).toLocaleString('pt-PT')} KZ</h3>
-        <p><strong>Pagamento:</strong> ${safeDados.metodo_pagamento || 'WhatsApp'}</p>
-      `;
-    } else if (tipo === 'abandono') {
-      assunto = '🛒 Carrinho Abandonado - JM Store';
-      
-      let itensHtml = '';
-      if (safeDados.itens && Array.isArray(safeDados.itens)) {
-        itensHtml = safeDados.itens.map(i => 
-          `<p>${i.nome || 'Produto'} x${i.quantidade || 1} = ${((i.preco || 0) * (i.quantidade || 1)).toLocaleString('pt-PT')} KZ</p>`
-        ).join('');
-      } else {
-        itensHtml = '<p>Nenhum item no carrinho</p>';
-      }
-
-      html = `
-        <h2>🛒 CARRINHO ABANDONADO</h2>
-        <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
-        <h3>👤 DADOS DO CLIENTE</h3>
-        <p><strong>Nome:</strong> ${safeDados.nome || 'Visitante'}</p>
-        <p><strong>Email:</strong> ${safeDados.email || 'Não informado'}</p>
-        <p><strong>Telefone:</strong> ${safeDados.telefone || 'Não informado'}</p>
-        <h3>📋 ITENS NO CARRINHO</h3>
-        ${itensHtml}
-        <h3>💰 TOTAL: ${(safeDados.total || 0).toLocaleString('pt-PT')} KZ</h3>
-      `;
-    }
-
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: process.env.EMAIL_NOTIFICACAO || process.env.EMAIL_USER,
-      subject: assunto,
-      html: html
-    });
-
-    console.log(`📧 Email enviado: ${tipo}`);
-    return true;
-  } catch (error) {
-    console.error('❌ Erro ao enviar email:', error);
-    return false;
-  }
-}
-
 // ============================================
 // GEOLOCALIZAÇÃO - IP API
 // ============================================
