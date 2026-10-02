@@ -64,50 +64,40 @@ if (!JWT_SECRET) {
   process.exit(1);
 }
 
+
 // ============================================
-// 📧 EMAIL CONFIG - BREVO (SMTP)
+// 📧 EMAIL CONFIG - BREVO API (HTTPS)
 // ============================================
-let transporter = null;
+const brevo = require('@getbrevo/brevo');
+
+let brevoApiInstance = null;
 let emailConfigurado = false;
 
-if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-  transporter = nodemailer.createTransport({
-    host: 'smtp-relay.brevo.com',
-    port: 587,
-    secure: false, // STARTTLS
-    auth: {
-      user: process.env.EMAIL_USER,   // bc4bcc001@smtp-brevo.com
-      pass: process.env.EMAIL_PASS    // xsmtpsib-82a34c54...
-    },
-    connectionTimeout: 15000,
-    greetingTimeout: 15000,
-    socketTimeout: 20000,
-    // Forçar IPv4 (Render às vezes prefere IPv6 e falha)
-    family: 4
-  });
-  
-  // ✅ Testar conexão ao iniciar
-  transporter.verify(function(error, success) {
-    if (error) {
-      console.error('❌ Erro ao configurar Brevo:', error.message);
-      emailConfigurado = false;
-    } else {
-      console.log('📧 Brevo configurado e verificado com sucesso!');
-      console.log('📧 Enviando de:', process.env.EMAIL_USER);
-      console.log('📧 Notificações para:', process.env.EMAIL_NOTIFICACAO);
-      emailConfigurado = true;
-    }
-  });
+if (process.env.BREVO_API_KEY) {
+  try {
+    const apiInstance = new brevo.TransactionalEmailsApi();
+    apiInstance.setApiKey(
+      brevo.TransactionalEmailsApiApiKeys.apiKey,
+      process.env.BREVO_API_KEY
+    );
+    brevoApiInstance = apiInstance;
+    emailConfigurado = true;
+    console.log('📧 Brevo API configurada com sucesso!');
+    console.log('📧 API Key:', process.env.BREVO_API_KEY.substring(0, 20) + '...');
+    console.log('📧 Notificações para:', process.env.EMAIL_NOTIFICACAO);
+  } catch (error) {
+    console.error('❌ Erro Brevo API:', error.message);
+  }
 } else {
-  console.log('⚠️ Email não configurado (variáveis faltando)');
+  console.log('⚠️ BREVO_API_KEY não configurada');
 }
 
 // ============================================
-// FUNÇÃO PARA ENVIAR NOTIFICAÇÃO
+// FUNÇÃO PARA ENVIAR NOTIFICAÇÃO (VIA API)
 // ============================================
 async function enviarNotificacaoEmail(tipo, dados) {
-  if (!transporter) {
-    console.log('⚠️ Email não enviado: transporter não configurado');
+  if (!brevoApiInstance) {
+    console.log('⚠️ Email não enviado: Brevo API não configurada');
     return false;
   }
 
@@ -119,18 +109,12 @@ async function enviarNotificacaoEmail(tipo, dados) {
     if (tipo === 'novo_usuario') {
       assunto = '🆕 Novo Usuário Cadastrado - JM Store';
       html = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <div style="background: #1E3A8A; color: white; padding: 20px; border-radius: 10px 10px 0 0;">
-            <h1 style="margin: 0;">🆕 Novo Usuário Cadastrado</h1>
-          </div>
-          <div style="background: #f8fafc; padding: 20px; border-radius: 0 0 10px 10px;">
-            <p><strong>Nome:</strong> ${safeDados.nome || 'Não informado'}</p>
-            <p><strong>Email:</strong> ${safeDados.email || 'Não informado'}</p>
-            <p><strong>Telefone:</strong> ${safeDados.telefone || 'Não informado'}</p>
-            <p><strong>Região:</strong> ${safeDados.regiao || 'Não informado'}</p>
-            <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
-          </div>
-        </div>
+        <h2>🆕 Novo Usuário Cadastrado</h2>
+        <p><strong>Nome:</strong> ${safeDados.nome || 'Não informado'}</p>
+        <p><strong>Email:</strong> ${safeDados.email || 'Não informado'}</p>
+        <p><strong>Telefone:</strong> ${safeDados.telefone || 'Não informado'}</p>
+        <p><strong>Região:</strong> ${safeDados.regiao || 'Não informado'}</p>
+        <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
       `;
     } else if (tipo === 'pedido_finalizado') {
       assunto = '🛍️ Novo Pedido Finalizado - JM Store #' + (safeDados.pedido_id || 'PENDENTE');
@@ -145,25 +129,19 @@ async function enviarNotificacaoEmail(tipo, dados) {
       }
 
       html = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <div style="background: #1E3A8A; color: white; padding: 20px; border-radius: 10px 10px 0 0;">
-            <h1 style="margin: 0;">🛍️ NOVO PEDIDO FINALIZADO</h1>
-            <p style="margin: 5px 0 0 0;">Pedido #${safeDados.pedido_id || 'PENDENTE'}</p>
-          </div>
-          <div style="background: #f8fafc; padding: 20px; border-radius: 0 0 10px 10px;">
-            <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
-            <h3>👤 DADOS DO CLIENTE</h3>
-            <p><strong>Nome:</strong> ${safeDados.nome || 'Não informado'}</p>
-            <p><strong>Email:</strong> ${safeDados.email || 'Não informado'}</p>
-            <p><strong>Telefone:</strong> ${safeDados.telefone || 'Não informado'}</p>
-            <p><strong>Região:</strong> ${safeDados.regiao || 'Não informado'}</p>
-            <p><strong>Endereço:</strong> ${safeDados.endereco || 'Não informado'}</p>
-            <h3>📋 ITENS DO PEDIDO</h3>
-            ${itensHtml}
-            <h3 style="color: #16A34A;">💰 TOTAL: ${(safeDados.total || 0).toLocaleString('pt-PT')} KZ</h3>
-            <p><strong>Pagamento:</strong> ${safeDados.metodo_pagamento || 'WhatsApp'}</p>
-          </div>
-        </div>
+        <h2>🛍️ NOVO PEDIDO FINALIZADO</h2>
+        <p><strong>Pedido #:</strong> ${safeDados.pedido_id || 'PENDENTE'}</p>
+        <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
+        <h3>👤 DADOS DO CLIENTE</h3>
+        <p><strong>Nome:</strong> ${safeDados.nome || 'Não informado'}</p>
+        <p><strong>Email:</strong> ${safeDados.email || 'Não informado'}</p>
+        <p><strong>Telefone:</strong> ${safeDados.telefone || 'Não informado'}</p>
+        <p><strong>Região:</strong> ${safeDados.regiao || 'Não informado'}</p>
+        <p><strong>Endereço:</strong> ${safeDados.endereco || 'Não informado'}</p>
+        <h3>📋 ITENS DO PEDIDO</h3>
+        ${itensHtml}
+        <h3>💰 TOTAL: ${(safeDados.total || 0).toLocaleString('pt-PT')} KZ</h3>
+        <p><strong>Pagamento:</strong> ${safeDados.metodo_pagamento || 'WhatsApp'}</p>
       `;
     } else if (tipo === 'abandono') {
       assunto = '🛒 Carrinho Abandonado - JM Store';
@@ -178,35 +156,39 @@ async function enviarNotificacaoEmail(tipo, dados) {
       }
 
       html = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <div style="background: #F59E0B; color: white; padding: 20px; border-radius: 10px 10px 0 0;">
-            <h1 style="margin: 0;">🛒 CARRINHO ABANDONADO</h1>
-          </div>
-          <div style="background: #FFF7ED; padding: 20px; border-radius: 0 0 10px 10px;">
-            <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
-            <h3>👤 DADOS DO CLIENTE</h3>
-            <p><strong>Nome:</strong> ${safeDados.nome || 'Visitante'}</p>
-            <p><strong>Email:</strong> ${safeDados.email || 'Não informado'}</p>
-            <p><strong>Telefone:</strong> ${safeDados.telefone || 'Não informado'}</p>
-            <h3>📋 ITENS NO CARRINHO</h3>
-            ${itensHtml}
-            <h3 style="color: #92400E;">💰 TOTAL: ${(safeDados.total || 0).toLocaleString('pt-PT')} KZ</h3>
-          </div>
-        </div>
+        <h2>🛒 CARRINHO ABANDONADO</h2>
+        <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
+        <h3>👤 DADOS DO CLIENTE</h3>
+        <p><strong>Nome:</strong> ${safeDados.nome || 'Visitante'}</p>
+        <p><strong>Email:</strong> ${safeDados.email || 'Não informado'}</p>
+        <p><strong>Telefone:</strong> ${safeDados.telefone || 'Não informado'}</p>
+        <h3>📋 ITENS NO CARRINHO</h3>
+        ${itensHtml}
+        <h3>💰 TOTAL: ${(safeDados.total || 0).toLocaleString('pt-PT')} KZ</h3>
       `;
     }
 
-    const info = await transporter.sendMail({
-      from: '"JM Store" <' + process.env.EMAIL_NOTIFICACAO + '>',
-      to: process.env.EMAIL_NOTIFICACAO,
-      subject: assunto,
-      html: html
-    });
+    // ✅ Enviar via API REST (HTTPS - nunca bloqueado)
+    const sendSmtpEmail = new brevo.SendSmtpEmail();
+    sendSmtpEmail.subject = assunto;
+    sendSmtpEmail.htmlContent = html;
+    sendSmtpEmail.sender = { 
+      name: 'JM Store', 
+      email: process.env.EMAIL_NOTIFICACAO // Deve ser verificado no Brevo
+    };
+    sendSmtpEmail.to = [{ 
+      email: process.env.EMAIL_NOTIFICACAO,
+      name: 'Admin JM Store'
+    }];
 
-    console.log(`📧 Email enviado: ${tipo} - ID: ${info.messageId}`);
+    const result = await brevoApiInstance.sendTransacEmail(sendSmtpEmail);
+    console.log(`📧 Email enviado (API): ${tipo} - ID: ${result.messageId}`);
     return true;
   } catch (error) {
     console.error('❌ Erro ao enviar email:', error.message);
+    if (error.response && error.response.body) {
+      console.error('❌ Detalhes:', JSON.stringify(error.response.body));
+    }
     return false;
   }
 }
@@ -242,39 +224,40 @@ app.get('/', function(req, res) {
 // ============================================
 app.get('/api/test-email', async function(req, res) {
   try {
-    if (!transporter) {
+    if (!brevoApiInstance) {
       return res.status(500).json({ 
-        error: 'Transporter não configurado',
-        EMAIL_USER: process.env.EMAIL_USER ? 'Definido' : 'Faltando',
-        EMAIL_PASS: process.env.EMAIL_PASS ? 'Definido' : 'Faltando'
+        error: 'Brevo API não configurada',
+        BREVO_API_KEY: process.env.BREVO_API_KEY ? 'Definido' : 'Faltando'
       });
     }
     
-    const info = await transporter.sendMail({
-      from: '"JM Store" <' + process.env.EMAIL_NOTIFICACAO + '>',
-      to: process.env.EMAIL_NOTIFICACAO,
-      subject: '🧪 Teste JM Store - Brevo',
-      html: `
-        <div style="font-family: Arial, sans-serif; padding: 20px;">
-          <h1 style="color: #1E3A8A;">✅ Email funcionando!</h1>
-          <p>Se recebeu este email, o Brevo está configurado corretamente.</p>
-          <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
-          <p><strong>Enviado para:</strong> ${process.env.EMAIL_NOTIFICACAO}</p>
-        </div>
-      `
-    });
+    const sendSmtpEmail = new brevo.SendSmtpEmail();
+    sendSmtpEmail.subject = '🧪 Teste JM Store - Brevo API';
+    sendSmtpEmail.htmlContent = `
+      <h1>✅ Email funcionando!</h1>
+      <p>Se recebeu este email, a API do Brevo está configurada corretamente.</p>
+      <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
+    `;
+    sendSmtpEmail.sender = { 
+      name: 'JM Store', 
+      email: process.env.EMAIL_NOTIFICACAO 
+    };
+    sendSmtpEmail.to = [{ 
+      email: process.env.EMAIL_NOTIFICACAO,
+      name: 'Admin JM Store'
+    }];
+
+    const result = await brevoApiInstance.sendTransacEmail(sendSmtpEmail);
     
     res.json({ 
       success: true, 
       msg: 'Email enviado! Verifique a caixa de entrada.',
-      messageId: info.messageId,
-      response: info.response
+      messageId: result.messageId
     });
   } catch (error) {
     res.status(500).json({ 
       error: error.message,
-      code: error.code,
-      response: error.response
+      details: error.response ? error.response.body : null
     });
   }
 });
