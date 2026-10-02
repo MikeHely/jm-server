@@ -65,19 +65,39 @@ if (!JWT_SECRET) {
 }
 
 // ============================================
-// EMAIL CONFIG - DEFINIDO ANTES DAS ROTAS!
+// 📧 EMAIL CONFIG - BREVO (SMTP)
 // ============================================
 let transporter = null;
+let emailConfigurado = false;
+
 if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
   transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp-relay.brevo.com',
+    port: 587,
+    secure: false, // STARTTLS
     auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS
+      user: process.env.EMAIL_USER,   // bc4bcc001@smtp-brevo.com
+      pass: process.env.EMAIL_PASS    // xsmtpsib-82a34c54...
+    },
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 20000,
+    // Forçar IPv4 (Render às vezes prefere IPv6 e falha)
+    family: 4
+  });
+  
+  // ✅ Testar conexão ao iniciar
+  transporter.verify(function(error, success) {
+    if (error) {
+      console.error('❌ Erro ao configurar Brevo:', error.message);
+      emailConfigurado = false;
+    } else {
+      console.log('📧 Brevo configurado e verificado com sucesso!');
+      console.log('📧 Enviando de:', process.env.EMAIL_USER);
+      console.log('📧 Notificações para:', process.env.EMAIL_NOTIFICACAO);
+      emailConfigurado = true;
     }
   });
-  console.log('📧 Email configurado com sucesso!');
-  console.log('📧 Notificações serão enviadas para:', process.env.EMAIL_NOTIFICACAO);
 } else {
   console.log('⚠️ Email não configurado (variáveis faltando)');
 }
@@ -87,7 +107,7 @@ if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
 // ============================================
 async function enviarNotificacaoEmail(tipo, dados) {
   if (!transporter) {
-    console.log('⚠️ Email não enviado: transporte não configurado');
+    console.log('⚠️ Email não enviado: transporter não configurado');
     return false;
   }
 
@@ -99,12 +119,18 @@ async function enviarNotificacaoEmail(tipo, dados) {
     if (tipo === 'novo_usuario') {
       assunto = '🆕 Novo Usuário Cadastrado - JM Store';
       html = `
-        <h2>🆕 Novo Usuário Cadastrado</h2>
-        <p><strong>Nome:</strong> ${safeDados.nome || 'Não informado'}</p>
-        <p><strong>Email:</strong> ${safeDados.email || 'Não informado'}</p>
-        <p><strong>Telefone:</strong> ${safeDados.telefone || 'Não informado'}</p>
-        <p><strong>Região:</strong> ${safeDados.regiao || 'Não informado'}</p>
-        <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <div style="background: #1E3A8A; color: white; padding: 20px; border-radius: 10px 10px 0 0;">
+            <h1 style="margin: 0;">🆕 Novo Usuário Cadastrado</h1>
+          </div>
+          <div style="background: #f8fafc; padding: 20px; border-radius: 0 0 10px 10px;">
+            <p><strong>Nome:</strong> ${safeDados.nome || 'Não informado'}</p>
+            <p><strong>Email:</strong> ${safeDados.email || 'Não informado'}</p>
+            <p><strong>Telefone:</strong> ${safeDados.telefone || 'Não informado'}</p>
+            <p><strong>Região:</strong> ${safeDados.regiao || 'Não informado'}</p>
+            <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
+          </div>
+        </div>
       `;
     } else if (tipo === 'pedido_finalizado') {
       assunto = '🛍️ Novo Pedido Finalizado - JM Store #' + (safeDados.pedido_id || 'PENDENTE');
@@ -119,19 +145,25 @@ async function enviarNotificacaoEmail(tipo, dados) {
       }
 
       html = `
-        <h2>🛍️ NOVO PEDIDO FINALIZADO</h2>
-        <p><strong>Pedido #:</strong> ${safeDados.pedido_id || 'PENDENTE'}</p>
-        <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
-        <h3>👤 DADOS DO CLIENTE</h3>
-        <p><strong>Nome:</strong> ${safeDados.nome || 'Não informado'}</p>
-        <p><strong>Email:</strong> ${safeDados.email || 'Não informado'}</p>
-        <p><strong>Telefone:</strong> ${safeDados.telefone || 'Não informado'}</p>
-        <p><strong>Região:</strong> ${safeDados.regiao || 'Não informado'}</p>
-        <p><strong>Endereço:</strong> ${safeDados.endereco || 'Não informado'}</p>
-        <h3>📋 ITENS DO PEDIDO</h3>
-        ${itensHtml}
-        <h3>💰 TOTAL: ${(safeDados.total || 0).toLocaleString('pt-PT')} KZ</h3>
-        <p><strong>Pagamento:</strong> ${safeDados.metodo_pagamento || 'WhatsApp'}</p>
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <div style="background: #1E3A8A; color: white; padding: 20px; border-radius: 10px 10px 0 0;">
+            <h1 style="margin: 0;">🛍️ NOVO PEDIDO FINALIZADO</h1>
+            <p style="margin: 5px 0 0 0;">Pedido #${safeDados.pedido_id || 'PENDENTE'}</p>
+          </div>
+          <div style="background: #f8fafc; padding: 20px; border-radius: 0 0 10px 10px;">
+            <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
+            <h3>👤 DADOS DO CLIENTE</h3>
+            <p><strong>Nome:</strong> ${safeDados.nome || 'Não informado'}</p>
+            <p><strong>Email:</strong> ${safeDados.email || 'Não informado'}</p>
+            <p><strong>Telefone:</strong> ${safeDados.telefone || 'Não informado'}</p>
+            <p><strong>Região:</strong> ${safeDados.regiao || 'Não informado'}</p>
+            <p><strong>Endereço:</strong> ${safeDados.endereco || 'Não informado'}</p>
+            <h3>📋 ITENS DO PEDIDO</h3>
+            ${itensHtml}
+            <h3 style="color: #16A34A;">💰 TOTAL: ${(safeDados.total || 0).toLocaleString('pt-PT')} KZ</h3>
+            <p><strong>Pagamento:</strong> ${safeDados.metodo_pagamento || 'WhatsApp'}</p>
+          </div>
+        </div>
       `;
     } else if (tipo === 'abandono') {
       assunto = '🛒 Carrinho Abandonado - JM Store';
@@ -146,29 +178,35 @@ async function enviarNotificacaoEmail(tipo, dados) {
       }
 
       html = `
-        <h2>🛒 CARRINHO ABANDONADO</h2>
-        <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
-        <h3>👤 DADOS DO CLIENTE</h3>
-        <p><strong>Nome:</strong> ${safeDados.nome || 'Visitante'}</p>
-        <p><strong>Email:</strong> ${safeDados.email || 'Não informado'}</p>
-        <p><strong>Telefone:</strong> ${safeDados.telefone || 'Não informado'}</p>
-        <h3>📋 ITENS NO CARRINHO</h3>
-        ${itensHtml}
-        <h3>💰 TOTAL: ${(safeDados.total || 0).toLocaleString('pt-PT')} KZ</h3>
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <div style="background: #F59E0B; color: white; padding: 20px; border-radius: 10px 10px 0 0;">
+            <h1 style="margin: 0;">🛒 CARRINHO ABANDONADO</h1>
+          </div>
+          <div style="background: #FFF7ED; padding: 20px; border-radius: 0 0 10px 10px;">
+            <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
+            <h3>👤 DADOS DO CLIENTE</h3>
+            <p><strong>Nome:</strong> ${safeDados.nome || 'Visitante'}</p>
+            <p><strong>Email:</strong> ${safeDados.email || 'Não informado'}</p>
+            <p><strong>Telefone:</strong> ${safeDados.telefone || 'Não informado'}</p>
+            <h3>📋 ITENS NO CARRINHO</h3>
+            ${itensHtml}
+            <h3 style="color: #92400E;">💰 TOTAL: ${(safeDados.total || 0).toLocaleString('pt-PT')} KZ</h3>
+          </div>
+        </div>
       `;
     }
 
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: process.env.EMAIL_NOTIFICACAO || process.env.EMAIL_USER,
+    const info = await transporter.sendMail({
+      from: '"JM Store" <' + process.env.EMAIL_NOTIFICACAO + '>',
+      to: process.env.EMAIL_NOTIFICACAO,
       subject: assunto,
       html: html
     });
 
-    console.log(`📧 Email enviado: ${tipo}`);
+    console.log(`📧 Email enviado: ${tipo} - ID: ${info.messageId}`);
     return true;
   } catch (error) {
-    console.error('❌ Erro ao enviar email:', error);
+    console.error('❌ Erro ao enviar email:', error.message);
     return false;
   }
 }
@@ -200,7 +238,7 @@ app.get('/', function(req, res) {
 });
 
 // ============================================
-// ROTA DE TESTE DE EMAIL (REMOVER DEPOIS)
+// ROTA DE TESTE DE EMAIL
 // ============================================
 app.get('/api/test-email', async function(req, res) {
   try {
@@ -212,18 +250,31 @@ app.get('/api/test-email', async function(req, res) {
       });
     }
     
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: process.env.EMAIL_NOTIFICACAO || process.env.EMAIL_USER,
-      subject: '🧪 Teste JM Store',
-      html: '<h1>✅ Email funcionando!</h1><p>Se recebeu este email, está tudo OK!</p>'
+    const info = await transporter.sendMail({
+      from: '"JM Store" <' + process.env.EMAIL_NOTIFICACAO + '>',
+      to: process.env.EMAIL_NOTIFICACAO,
+      subject: '🧪 Teste JM Store - Brevo',
+      html: `
+        <div style="font-family: Arial, sans-serif; padding: 20px;">
+          <h1 style="color: #1E3A8A;">✅ Email funcionando!</h1>
+          <p>Se recebeu este email, o Brevo está configurado corretamente.</p>
+          <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
+          <p><strong>Enviado para:</strong> ${process.env.EMAIL_NOTIFICACAO}</p>
+        </div>
+      `
     });
     
-    res.json({ success: true, msg: 'Email enviado! Verifique a caixa de entrada.' });
+    res.json({ 
+      success: true, 
+      msg: 'Email enviado! Verifique a caixa de entrada.',
+      messageId: info.messageId,
+      response: info.response
+    });
   } catch (error) {
     res.status(500).json({ 
       error: error.message,
-      code: error.code 
+      code: error.code,
+      response: error.response
     });
   }
 });
@@ -333,7 +384,7 @@ app.post('/api/register', async function(req, res) {
     
     if (error) throw error;
     
-    // ✅ Email de notificação em background
+    // ✅ Email em background
     enviarNotificacaoEmail('novo_usuario', { nome, email, telefone, regiao })
       .catch(err => console.error('Erro email novo usuário:', err));
     
@@ -629,11 +680,10 @@ app.get('/api/avaliacoes/:produto_id', async function(req, res) {
 });
 
 // ============================================
-// CHECKOUT E ABANDONOS - ÚNICA VEZ!
+// CHECKOUT E ABANDONOS
 // ============================================
 const abandonos = [];
 
-// ✅ Registrar abandono
 app.post('/api/checkout/registrar', async function(req, res) {
   try {
     const { sessionId, usuario, itens } = req.body;
@@ -662,7 +712,7 @@ app.post('/api/checkout/registrar', async function(req, res) {
     } else {
       abandonos.push(registro);
       
-      // ✅ Email em background (sem await)
+      // ✅ Email em background
       enviarNotificacaoEmail('abandono', {
         nome: usuario?.nome || 'Visitante',
         email: usuario?.email || 'Não informado',
@@ -679,7 +729,6 @@ app.post('/api/checkout/registrar', async function(req, res) {
   }
 });
 
-// ✅ Atualizar step do checkout
 app.post('/api/checkout/step', function(req, res) {
   try {
     const { sessionId, step } = req.body;
@@ -700,7 +749,6 @@ app.post('/api/checkout/step', function(req, res) {
   }
 });
 
-// ✅ Finalizar pedido (OTIMIZADO)
 app.post('/api/checkout', verificarToken, async function(req, res) {
   try {
     const usuario_id = req.usuario.id;
@@ -759,7 +807,7 @@ app.post('/api/checkout', verificarToken, async function(req, res) {
       }
     }
     
-    // ✅ Email em background (sem await)
+    // ✅ Email em background
     enviarNotificacaoEmail('pedido_finalizado', {
       pedido_id: pedido.id,
       nome: usuario?.nome,
@@ -1356,7 +1404,7 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, function() {
   console.log('🚀 JM Server rodando na porta ' + PORT);
   console.log('📊 Teste: https://jm-server.onrender.com/api/test');
-  console.log('📧 Teste Email: https://jm-server.onrender.com/api/test-email');
+  console.log('📧 Teste Email (Brevo): https://jm-server.onrender.com/api/test-email');
   console.log('📦 Produtos: https://jm-server.onrender.com/api/produtos');
   console.log('📂 Categorias: https://jm-server.onrender.com/api/categorias');
   console.log('❓ FAQ: https://jm-server.onrender.com/api/faq');
