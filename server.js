@@ -8,12 +8,13 @@ const sharp = require('sharp');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const nodemailer = require('nodemailer');
+const brevo = require('@getbrevo/brevo');
 require('dotenv').config();
 
 const app = express();
 
 // ============================================
-// 🔥 CORS CORRETO - PERMITE TODAS AS ORIGENS
+// 🔥 CORS CORRETO
 // ============================================
 const allowedOrigins = [
   'https://mikehely.github.io',
@@ -42,7 +43,7 @@ app.options('*', cors());
 app.use(express.json({ limit: '50mb' }));
 
 // ============================================
-// LOG DE TODAS AS REQUISIÇÕES
+// LOG DE REQUISIÇÕES
 // ============================================
 app.use(function(req, res, next) {
   console.log('📡 ' + req.method + ' ' + req.url + ' - Origin: ' + req.headers.origin);
@@ -64,23 +65,19 @@ if (!JWT_SECRET) {
   process.exit(1);
 }
 
-
 // ============================================
 // 📧 EMAIL CONFIG - BREVO API (HTTPS)
 // ============================================
-const brevo = require('@getbrevo/brevo');
-
 let brevoApiInstance = null;
 let emailConfigurado = false;
 
 if (process.env.BREVO_API_KEY) {
   try {
-    const apiInstance = new brevo.TransactionalEmailsApi();
-    apiInstance.setApiKey(
+    brevoApiInstance = new brevo.TransactionalEmailsApi();
+    brevoApiInstance.setApiKey(
       brevo.TransactionalEmailsApiApiKeys.apiKey,
       process.env.BREVO_API_KEY
     );
-    brevoApiInstance = apiInstance;
     emailConfigurado = true;
     console.log('📧 Brevo API configurada com sucesso!');
     console.log('📧 API Key:', process.env.BREVO_API_KEY.substring(0, 20) + '...');
@@ -93,7 +90,7 @@ if (process.env.BREVO_API_KEY) {
 }
 
 // ============================================
-// FUNÇÃO PARA ENVIAR NOTIFICAÇÃO (VIA API)
+// FUNÇÃO PARA ENVIAR NOTIFICAÇÃO
 // ============================================
 async function enviarNotificacaoEmail(tipo, dados) {
   if (!brevoApiInstance) {
@@ -109,12 +106,18 @@ async function enviarNotificacaoEmail(tipo, dados) {
     if (tipo === 'novo_usuario') {
       assunto = '🆕 Novo Usuário Cadastrado - JM Store';
       html = `
-        <h2>🆕 Novo Usuário Cadastrado</h2>
-        <p><strong>Nome:</strong> ${safeDados.nome || 'Não informado'}</p>
-        <p><strong>Email:</strong> ${safeDados.email || 'Não informado'}</p>
-        <p><strong>Telefone:</strong> ${safeDados.telefone || 'Não informado'}</p>
-        <p><strong>Região:</strong> ${safeDados.regiao || 'Não informado'}</p>
-        <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <div style="background: #1E3A8A; color: white; padding: 20px; border-radius: 10px 10px 0 0;">
+            <h1 style="margin: 0;">🆕 Novo Usuário Cadastrado</h1>
+          </div>
+          <div style="background: #f8fafc; padding: 20px; border-radius: 0 0 10px 10px;">
+            <p><strong>Nome:</strong> ${safeDados.nome || 'Não informado'}</p>
+            <p><strong>Email:</strong> ${safeDados.email || 'Não informado'}</p>
+            <p><strong>Telefone:</strong> ${safeDados.telefone || 'Não informado'}</p>
+            <p><strong>Região:</strong> ${safeDados.regiao || 'Não informado'}</p>
+            <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
+          </div>
+        </div>
       `;
     } else if (tipo === 'pedido_finalizado') {
       assunto = '🛍️ Novo Pedido Finalizado - JM Store #' + (safeDados.pedido_id || 'PENDENTE');
@@ -129,19 +132,25 @@ async function enviarNotificacaoEmail(tipo, dados) {
       }
 
       html = `
-        <h2>🛍️ NOVO PEDIDO FINALIZADO</h2>
-        <p><strong>Pedido #:</strong> ${safeDados.pedido_id || 'PENDENTE'}</p>
-        <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
-        <h3>👤 DADOS DO CLIENTE</h3>
-        <p><strong>Nome:</strong> ${safeDados.nome || 'Não informado'}</p>
-        <p><strong>Email:</strong> ${safeDados.email || 'Não informado'}</p>
-        <p><strong>Telefone:</strong> ${safeDados.telefone || 'Não informado'}</p>
-        <p><strong>Região:</strong> ${safeDados.regiao || 'Não informado'}</p>
-        <p><strong>Endereço:</strong> ${safeDados.endereco || 'Não informado'}</p>
-        <h3>📋 ITENS DO PEDIDO</h3>
-        ${itensHtml}
-        <h3>💰 TOTAL: ${(safeDados.total || 0).toLocaleString('pt-PT')} KZ</h3>
-        <p><strong>Pagamento:</strong> ${safeDados.metodo_pagamento || 'WhatsApp'}</p>
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <div style="background: #1E3A8A; color: white; padding: 20px; border-radius: 10px 10px 0 0;">
+            <h1 style="margin: 0;">🛍️ NOVO PEDIDO FINALIZADO</h1>
+            <p style="margin: 5px 0 0 0;">Pedido #${safeDados.pedido_id || 'PENDENTE'}</p>
+          </div>
+          <div style="background: #f8fafc; padding: 20px; border-radius: 0 0 10px 10px;">
+            <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
+            <h3>👤 DADOS DO CLIENTE</h3>
+            <p><strong>Nome:</strong> ${safeDados.nome || 'Não informado'}</p>
+            <p><strong>Email:</strong> ${safeDados.email || 'Não informado'}</p>
+            <p><strong>Telefone:</strong> ${safeDados.telefone || 'Não informado'}</p>
+            <p><strong>Região:</strong> ${safeDados.regiao || 'Não informado'}</p>
+            <p><strong>Endereço:</strong> ${safeDados.endereco || 'Não informado'}</p>
+            <h3>📋 ITENS DO PEDIDO</h3>
+            ${itensHtml}
+            <h3 style="color: #16A34A;">💰 TOTAL: ${(safeDados.total || 0).toLocaleString('pt-PT')} KZ</h3>
+            <p><strong>Pagamento:</strong> ${safeDados.metodo_pagamento || 'WhatsApp'}</p>
+          </div>
+        </div>
       `;
     } else if (tipo === 'abandono') {
       assunto = '🛒 Carrinho Abandonado - JM Store';
@@ -156,15 +165,21 @@ async function enviarNotificacaoEmail(tipo, dados) {
       }
 
       html = `
-        <h2>🛒 CARRINHO ABANDONADO</h2>
-        <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
-        <h3>👤 DADOS DO CLIENTE</h3>
-        <p><strong>Nome:</strong> ${safeDados.nome || 'Visitante'}</p>
-        <p><strong>Email:</strong> ${safeDados.email || 'Não informado'}</p>
-        <p><strong>Telefone:</strong> ${safeDados.telefone || 'Não informado'}</p>
-        <h3>📋 ITENS NO CARRINHO</h3>
-        ${itensHtml}
-        <h3>💰 TOTAL: ${(safeDados.total || 0).toLocaleString('pt-PT')} KZ</h3>
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <div style="background: #F59E0B; color: white; padding: 20px; border-radius: 10px 10px 0 0;">
+            <h1 style="margin: 0;">🛒 CARRINHO ABANDONADO</h1>
+          </div>
+          <div style="background: #FFF7ED; padding: 20px; border-radius: 0 0 10px 10px;">
+            <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
+            <h3>👤 DADOS DO CLIENTE</h3>
+            <p><strong>Nome:</strong> ${safeDados.nome || 'Visitante'}</p>
+            <p><strong>Email:</strong> ${safeDados.email || 'Não informado'}</p>
+            <p><strong>Telefone:</strong> ${safeDados.telefone || 'Não informado'}</p>
+            <h3>📋 ITENS NO CARRINHO</h3>
+            ${itensHtml}
+            <h3 style="color: #92400E;">💰 TOTAL: ${(safeDados.total || 0).toLocaleString('pt-PT')} KZ</h3>
+          </div>
+        </div>
       `;
     }
 
@@ -174,7 +189,7 @@ async function enviarNotificacaoEmail(tipo, dados) {
     sendSmtpEmail.htmlContent = html;
     sendSmtpEmail.sender = { 
       name: 'JM Store', 
-      email: process.env.EMAIL_NOTIFICACAO // Deve ser verificado no Brevo
+      email: process.env.EMAIL_NOTIFICACAO
     };
     sendSmtpEmail.to = [{ 
       email: process.env.EMAIL_NOTIFICACAO,
@@ -182,12 +197,12 @@ async function enviarNotificacaoEmail(tipo, dados) {
     }];
 
     const result = await brevoApiInstance.sendTransacEmail(sendSmtpEmail);
-    console.log(`📧 Email enviado (API): ${tipo} - ID: ${result.messageId}`);
+    console.log(`📧 Email enviado (Brevo API): ${tipo} - ID: ${result.messageId}`);
     return true;
   } catch (error) {
     console.error('❌ Erro ao enviar email:', error.message);
     if (error.response && error.response.body) {
-      console.error('❌ Detalhes:', JSON.stringify(error.response.body));
+      console.error('❌ Detalhes:', JSON.stringify(error.response.body, null, 2));
     }
     return false;
   }
@@ -201,7 +216,8 @@ app.get('/api/test', function(req, res) {
     status: 'online', 
     time: new Date().toISOString(),
     message: '🚀 JM Server está funcionando!',
-    cors: '✅ Configurado para GitHub Pages'
+    email: emailConfigurado ? '✅ Brevo configurado' : '⚠️ Brevo não configurado',
+    cors: '✅ Configurado'
   });
 });
 
@@ -210,11 +226,10 @@ app.get('/', function(req, res) {
     message: 'JM Store API',
     endpoints: {
       test: '/api/test',
+      testEmail: '/api/test-email',
       produtos: '/api/produtos',
       login: '/api/login',
-      register: '/api/register',
-      categorias: '/api/categorias',
-      faq: '/api/faq'
+      register: '/api/register'
     }
   });
 });
@@ -227,16 +242,20 @@ app.get('/api/test-email', async function(req, res) {
     if (!brevoApiInstance) {
       return res.status(500).json({ 
         error: 'Brevo API não configurada',
-        BREVO_API_KEY: process.env.BREVO_API_KEY ? 'Definido' : 'Faltando'
+        BREVO_API_KEY: process.env.BREVO_API_KEY ? 'Definido' : 'Faltando',
+        EMAIL_NOTIFICACAO: process.env.EMAIL_NOTIFICACAO ? 'Definido' : 'Faltando'
       });
     }
     
     const sendSmtpEmail = new brevo.SendSmtpEmail();
     sendSmtpEmail.subject = '🧪 Teste JM Store - Brevo API';
     sendSmtpEmail.htmlContent = `
-      <h1>✅ Email funcionando!</h1>
-      <p>Se recebeu este email, a API do Brevo está configurada corretamente.</p>
-      <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
+      <div style="font-family: Arial, sans-serif; padding: 20px;">
+        <h1 style="color: #1E3A8A;">✅ Email funcionando!</h1>
+        <p>A API do Brevo está configurada corretamente.</p>
+        <p><strong>Data:</strong> ${new Date().toLocaleString('pt-PT')}</p>
+        <p><strong>Enviado para:</strong> ${process.env.EMAIL_NOTIFICACAO}</p>
+      </div>
     `;
     sendSmtpEmail.sender = { 
       name: 'JM Store', 
@@ -267,7 +286,6 @@ app.get('/api/test-email', async function(req, res) {
 // ============================================
 app.get('/api/produtos', async function(req, res) {
   try {
-    console.log('📦 Buscando produtos...');
     const { data, error } = await supabase
       .from('produtos')
       .select('*')
@@ -275,7 +293,6 @@ app.get('/api/produtos', async function(req, res) {
       .order('id');
     
     if (error) throw error;
-    console.log('✅ Produtos carregados:', data ? data.length : 0);
     res.json(data || []);
   } catch (error) {
     console.error('❌ Erro ao buscar produtos:', error);
@@ -288,7 +305,6 @@ app.get('/api/produtos', async function(req, res) {
 // ============================================
 app.get('/api/categorias', async function(req, res) {
   try {
-    console.log('📂 Buscando categorias...');
     const { data, error } = await supabase
       .from('produtos')
       .select('categoria')
@@ -297,7 +313,6 @@ app.get('/api/categorias', async function(req, res) {
     
     if (error) throw error;
     const categorias = [...new Set((data || []).map(p => p.categoria))];
-    console.log('✅ Categorias carregadas:', categorias);
     res.json(categorias);
   } catch (error) {
     console.error('❌ Erro categorias:', error);
@@ -310,7 +325,6 @@ app.get('/api/categorias', async function(req, res) {
 // ============================================
 app.get('/api/faq', async function(req, res) {
   try {
-    console.log('❓ Buscando FAQ...');
     const { data, error } = await supabase
       .from('faq')
       .select('*')
@@ -318,7 +332,6 @@ app.get('/api/faq', async function(req, res) {
       .order('ordem');
     
     if (error) throw error;
-    console.log('✅ FAQ carregadas:', data ? data.length : 0);
     res.json(data || []);
   } catch (error) {
     console.error('❌ Erro FAQ:', error);
@@ -333,8 +346,6 @@ app.post('/api/register', async function(req, res) {
   try {
     const { email, password, nome, telefone, regiao } = req.body;
     const senha = password || req.body.senha;
-    
-    console.log('📝 Tentativa de cadastro:', email);
     
     if (!email || !senha || !nome || !telefone) {
       return res.status(400).json({ error: "Todos os campos são obrigatórios" });
@@ -367,7 +378,7 @@ app.post('/api/register', async function(req, res) {
     
     if (error) throw error;
     
-    // ✅ Email em background
+    // Email em background
     enviarNotificacaoEmail('novo_usuario', { nome, email, telefone, regiao })
       .catch(err => console.error('Erro email novo usuário:', err));
     
@@ -388,8 +399,6 @@ app.post('/api/login', async function(req, res) {
   try {
     const { email, senha } = req.body;
     
-    console.log('🔐 Tentativa login:', email);
-    
     if (!email || !senha) {
       return res.status(400).json({ error: "Email e senha são obrigatórios" });
     }
@@ -401,13 +410,11 @@ app.post('/api/login', async function(req, res) {
       .single();
     
     if (error || !data) {
-      console.log('❌ Usuário não encontrado:', email);
       return res.status(401).json({ error: "Email ou senha inválidos" });
     }
     
     const senhaCorreta = await bcrypt.compare(senha, data.senha);
     if (!senhaCorreta) {
-      console.log('❌ Senha incorreta para:', email);
       return res.status(401).json({ error: "Email ou senha inválidos" });
     }
     
@@ -422,7 +429,6 @@ app.post('/api/login', async function(req, res) {
     
     const token = jwt.sign(usuario, JWT_SECRET, { expiresIn: '90d' });
     
-    console.log('✅ Login bem-sucedido:', email);
     res.json({ 
       msg: "Login realizado com sucesso!", 
       user: usuario, 
@@ -435,7 +441,7 @@ app.post('/api/login', async function(req, res) {
 });
 
 // ============================================
-// MIDDLEWARE TOKEN
+// MIDDLEWARES
 // ============================================
 function verificarToken(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -695,7 +701,7 @@ app.post('/api/checkout/registrar', async function(req, res) {
     } else {
       abandonos.push(registro);
       
-      // ✅ Email em background
+      // Email em background
       enviarNotificacaoEmail('abandono', {
         nome: usuario?.nome || 'Visitante',
         email: usuario?.email || 'Não informado',
@@ -743,7 +749,6 @@ app.post('/api/checkout', verificarToken, async function(req, res) {
     
     const total = itens.reduce((s, i) => s + i.preco * i.quantidade, 0);
     
-    // ✅ Buscar usuário E criar pedido EM PARALELO
     const [usuarioResult, pedidoResult] = await Promise.all([
       supabase
         .from('usuarios')
@@ -769,7 +774,6 @@ app.post('/api/checkout', verificarToken, async function(req, res) {
     
     if (pedidoResult.error) throw pedidoResult.error;
     
-    // ✅ Salvar itens E limpar carrinho EM PARALELO
     await Promise.all([
       supabase.from('itens_pedido').insert(itens.map(i => ({
         pedido_id: pedido.id,
@@ -780,7 +784,6 @@ app.post('/api/checkout', verificarToken, async function(req, res) {
       supabase.from('carrinho').delete().eq('usuario_id', usuario_id)
     ]);
     
-    // Atualizar abandono
     if (sessionId) {
       const abandono = abandonos.find(a => a.sessionId === sessionId);
       if (abandono) {
@@ -790,7 +793,7 @@ app.post('/api/checkout', verificarToken, async function(req, res) {
       }
     }
     
-    // ✅ Email em background
+    // Email em background
     enviarNotificacaoEmail('pedido_finalizado', {
       pedido_id: pedido.id,
       nome: usuario?.nome,
@@ -803,7 +806,6 @@ app.post('/api/checkout', verificarToken, async function(req, res) {
       metodo_pagamento: metodo_pagamento || 'WhatsApp'
     }).catch(err => console.error('Erro email pedido:', err));
     
-    // ✅ Responder IMEDIATAMENTE
     let msg = `*🛍️ NOVO PEDIDO JM STORE #${pedido.id}*\n\n`;
     msg += `👤 *Cliente:* ${usuario?.nome || 'Não informado'}\n`;
     msg += `📧 *Email:* ${usuario?.email || 'Não informado'}\n`;
@@ -1139,7 +1141,6 @@ app.post('/api/visitantes/registrar', async function(req, res) {
       return res.status(500).json({ error: error.message });
     }
 
-    console.log(`✅ Visita registrada: ${sessionId} (${localizacao?.country || 'Desconhecido'})`);
     res.json({ msg: 'Visita registrada', data: data[0] });
   } catch (error) {
     console.error('❌ Erro ao registrar visita:', error);
@@ -1345,8 +1346,6 @@ app.get('/api/geolocalizacao', async function(req, res) {
       });
     }
     
-    console.log('📍 Buscando localização para IP:', ipClean);
-    
     const response = await fetch(`http://ip-api.com/json/${ipClean}?fields=status,country,countryCode,regionName,city,isp,lat,lon`);
     const data = await response.json();
     
@@ -1386,10 +1385,7 @@ app.get('/api/geolocalizacao', async function(req, res) {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, function() {
   console.log('🚀 JM Server rodando na porta ' + PORT);
+  console.log('📧 Brevo API:', emailConfigurado ? '✅ Configurado' : '❌ Não configurado');
   console.log('📊 Teste: https://jm-server.onrender.com/api/test');
-  console.log('📧 Teste Email (Brevo): https://jm-server.onrender.com/api/test-email');
-  console.log('📦 Produtos: https://jm-server.onrender.com/api/produtos');
-  console.log('📂 Categorias: https://jm-server.onrender.com/api/categorias');
-  console.log('❓ FAQ: https://jm-server.onrender.com/api/faq');
-  console.log('✅ CORS: Permitido para GitHub Pages e Vercel');
+  console.log('📧 Teste Email: https://jm-server.onrender.com/api/test-email');
 });
